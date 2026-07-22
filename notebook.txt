@@ -1,0 +1,158 @@
+df = pd.read_csv(r'C:\Users\mo.ahmadi\Desktop\FINALPROJECT\docs\g10.csv', low_memory=False)
+df.head()
+
+cols_to_keep = [
+                "NationalCode", "LoanDetail","ChequeDetail", "JobType", "IranianRank",
+                "MountlyIncome", "IncomeScore", "JobScore", "AssetScore",
+                "TotalCustomerScore", "TotalFacilities"
+]
+df1 = df[cols_to_keep]
+df1
+
+cols_to_numeric = ["MountlyIncome", "JobType"]
+df1[cols_to_numeric] = df1[cols_to_numeric].apply(pd.to_numeric, errors='coerce')
+
+df1.info()
+
+def process_data(json_str):
+    # new_col_names = [  
+    #     'DebtAmount', 'OriginAmount', 'LoanCounts','SarResid', 'Moavagh', 'Mashkuk', 'DefaultFlag', 'PenaltyScore', 'WeightedPenalty',
+    #     'DefaultedLoans', 'DebtRatio', 'DebtPerLoan', 'DefaultRate', 'DelayTotal',
+    #     'DelinquencyScore', 'RiskRatio', 'DebtXPpenalty'
+    # ]
+
+    new_col_names = [  
+        'DebtAmount', 'OriginAmount', 'LoanCounts','SarResid', 'Moavagh', 'Mashkuk', 'DefaultFlag', 'DebtRatio', 'DebtPerLoan'
+    ]
+
+    try:
+        data = json.loads(json_str)
+        loan_rows = data.get('Data', {}).get('EstelamAsliRows', [])
+        if not loan_rows:
+            return pd.Series([0]*len(new_col_names), index=  new_col_names)
+        for row in loan_rows:
+            for key in ['AmBedehiKol', 'AmOriginal', 'AmSarResid', 'AmMoavagh', 'AmMashkuk']:
+                row[key] = float(row.get(key, 0)) if row.get(key) is not None else 0.0
+
+        debt_amount = sum(row["AmBedehiKol"] for row in loan_rows)
+        origin_amount = sum(row["AmOriginal"] for row in loan_rows)
+        loan_counts = len(loan_rows)
+
+        default_flag = 0
+        total_penalty_points= 0
+        weighted_penalty_numerator= 0
+        # p_max = 5
+        defaulted_loans_count = 0
+        debt_ratio_list = []
+        # delinquency_score = 0
+        # alpha = 1.2
+        # epsilon = 1e-9
+
+        for row in loan_rows:
+            sarresid_val = float(row.get('AmSarResid', 0) or 0)
+            moavagh_val = float(row.get('AmMoavagh', 0) or 0)
+            mashkuk_val = float(row.get('AmMashkuk', 0) or 0) 
+
+            pi = (1 * sarresid_val) + (3 * moavagh_val) + (60 * mashkuk_val)
+
+            if pi > 0:
+                default_flag = 1 
+                defaulted_loans_count +=1
+
+            if row['AmOriginal'] > 0:
+                debt_ratio_list.append(row['AmBedehiKol']/row['AmOriginal'])
+
+            # delinquency_score += (pi + epsilon) ** alpha
+            total_penalty_points+=pi
+            weighted_penalty_numerator+= pi*row['AmBedehiKol']
+
+        # penalty_score = total_penalty_points/(p_max*loan_counts) if loan_counts > 0 else 0
+        # weighted_penalty= weighted_penalty_numerator/(p_max*debt_amount) if debt_amount > 0 else 0
+        # defaulted_loans = defaulted_loans_count 
+        debt_ratio = np.mean(debt_ratio_list) if debt_ratio_list else 0 
+        debt_per_loan = debt_amount/loan_counts if loan_counts > 0 else 0
+        # default_rate = defaulted_loans/loan_counts if loan_counts > 0 else 0 
+        # delay_total = total_penalty_points
+        # risk_ratio = weighted_penalty * default_rate if default_rate > 0 else 0 
+        # debt_x_penalty = penalty_score * debt_amount
+        
+    #     return pd.Series([
+    #     debt_amount, origin_amount, loan_counts, sarresid_val, moavagh_val, mashkuk_val, default_flag,
+    #     penalty_score, weighted_penalty, defaulted_loans, debt_ratio, debt_per_loan, default_rate,
+    #     delay_total, delinquency_score, risk_ratio, debt_x_penalty
+    # ], index=new_col_names)
+
+        return pd.Series([
+        debt_amount, origin_amount, loan_counts, sarresid_val, moavagh_val, mashkuk_val, default_flag,
+        debt_ratio, debt_per_loan,
+    ], index=new_col_names)
+    except(json.JSONDecodeError, TypeError, AttributeError):
+        return pd.Series([np.nan] * len(new_col_names), index=new_col_names)
+
+new_features = df1['LoanDetail'].apply(process_data)
+df_merg = pd.concat([df1, new_features], axis = 1)
+df_merg
+
+df_merg.drop(columns=['LoanDetail', 'ChequeDetail', 'Mashkuk', 'Moavagh', 'SarResid'], inplace=True)
+
+rank_data = {
+    'IranianRank': ['A1', 'A2', 'A3', 'B1', 'B2', 'B3', 'C1', 'C2', 'C3', 'D1', 'D2', 'D3', 'E1', 'E2', 'E3', 'Z'],
+    'Score_Max': [900, 679, 659, 639, 619, 599, 579, 559, 539, 519, 499, 479, 459, 439, 419, 559],
+    'Score_Min': [680, 660, 640, 620, 600, 580, 560, 540, 520, 500, 480, 460, 440, 420, 0, 540],
+    'Risk_Max': [3.1, 4.8, 7.5, 11.3, 16.9, 24.4, 33.8, 44.8, 56.3, 67.2, 76.5, 83.8, 89.1, 92.9, 100.0, 33.8],
+    'Risk_Min': [0.0, 3.1, 4.8, 7.5, 11.3, 16.9, 24.4, 33.8, 44.8, 56.3, 67.2, 76.5, 83.8, 89.1, 92.9, 24.4],
+}
+rank_lookup_df = pd.DataFrame(rank_data)
+
+df_merg['Has_No_History'] = np.where(df_merg['IranianRank'] == 'Z', 1, 0)
+
+df_enriched = pd.merge(df_merg, rank_lookup_df, on='IranianRank', how='left')
+df_enriched
+
+missing_values = df_enriched.isnull().sum()
+
+missing_percent = (missing_values / len(df)) * 100
+
+missing_info = pd.DataFrame({
+    'Missing_Count': missing_values,
+    'Missing_Percent': missing_percent
+})
+
+missing_info_sorted = missing_info.loc[lambda x: x['Missing_Count'] > 0].sort_values(by='Missing_Percent', ascending=False)
+
+with pd.option_context('display.max_rows', None):
+    print(missing_info_sorted)
+
+cols_to_drop = ["NationalCode", "IranianRank"]
+df_cleaned = df_enriched.drop(columns= cols_to_drop)
+df_cleaned.info()
+df_cleaned["Employed"] = np.where(df_cleaned["JobType"] == 4 , 0, 1)
+
+loan_features = [
+        'DebtAmount', 'OriginAmount', 'LoanCounts', 'DebtRatio', 'DebtPerLoan'
+]
+
+context_features = [
+    'MountlyIncome', 'IncomeScore', 'JobScore', 'AssetScore',
+    'TotalCustomerScore', 'DebtAmount', 'LoanCounts', 'DebtRatio'
+]
+
+for risk_col in loan_features:
+    for context_col in context_features:
+        if risk_col in df_cleaned.columns and context_col in df_cleaned.columns:
+            new_feature_name = f'{risk_col}_X_{context_col}_LogInteraction'
+
+            df_cleaned[new_feature_name] = df_cleaned[risk_col] * df_cleaned[context_col]
+            print(f"New features built: {new_feature_name}")
+            
+df_cleaned.describe()
+
+df_cleaned['is_zero_profile'] = ((df_cleaned['MountlyIncome'] == 0) & 
+                           (df_cleaned['JobScore'] == 0) & 
+                           (df_cleaned['Employed'] == 0) & 
+                           (df_cleaned['JobType'] == 4.0)).astype(int)
+
+df_cleaned = pd.get_dummies(df_cleaned, columns=['JobType'], prefix='JobType')
+df_cleaned.shape
+
+df_cleaned.to_csv('df_cleaned.csv')

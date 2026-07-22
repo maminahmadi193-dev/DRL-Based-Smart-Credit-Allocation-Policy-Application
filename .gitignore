@@ -1,0 +1,5 @@
+venv/
+__pycache__/
+*.csv
+*.zip
+docs/g10.csv
