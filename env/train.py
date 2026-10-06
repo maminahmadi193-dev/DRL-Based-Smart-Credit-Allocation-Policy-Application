@@ -1,4 +1,6 @@
-from stable_baselines3 import DQN
+# from stable_baselines3 import DQN
+
+from coverage_dqn import CoverageDQN
 
 from stable_baselines3.common.callbacks import (
     BaseCallback,
@@ -24,7 +26,7 @@ from sklearn.preprocessing import StandardScaler
 
 PATH = r"C:\\Users\\m.ahmadi\\Desktop\\FinalProject\\notebooks\\df_cleaned.csv"
 
-TOTAL_TIMESTEPS = 100000
+TOTAL_TIMESTEPS = 420000
 CHECKPOINT_FREQ = 2000
 
 CHECKPOINT_DIR = "models/checkpoints"
@@ -59,14 +61,14 @@ FEATURE_COLUMNS = [
 # ============================================================================
 # Q-Value Monitoring Callback
 # ============================================================================
-#
+
 # IMPORTANT:
 # This callback is ONLY for monitoring/visualization.
 # It is NOT used to decide convergence.
-#
+
 # Convergence analysis is performed separately in test.py
 # using the validation set.
-#
+
 # ============================================================================
 
 class QValueCallback(BaseCallback):
@@ -168,7 +170,164 @@ class QValueCallback(BaseCallback):
         self.model.policy.set_training_mode(True)
 
         return True
+class ActionCoverageCallback(BaseCallback):
+    """
+    Track which actions were actually selected for each customer
+    during DQN training.
+    """
 
+    def __init__(
+        self,
+        n_customers,
+        n_actions,
+        verbose=0,
+    ):
+        super().__init__(verbose)
+
+        self.n_customers = n_customers
+        self.n_actions = n_actions
+
+        self.customer_actions = [
+            set() for _ in range(n_customers)
+        ]
+
+    def _on_step(self):
+
+        infos = self.locals.get("infos", [])
+
+        for info in infos:
+
+            customer_index = info.get(
+                "customer_index"
+            )
+
+            action_index = info.get(
+                "action_index"
+            )
+
+            if (
+                customer_index is not None
+                and action_index is not None
+            ):
+                self.customer_actions[
+                    customer_index
+                ].add(
+                    int(action_index)
+                )
+
+        return True
+
+    def report(self):
+
+        distinct_action_counts = np.array(
+            [
+                len(actions)
+                for actions in self.customer_actions
+            ],
+            dtype=np.int32
+        )
+
+        print()
+        print("=" * 70)
+        print("ACTION COVERAGE ANALYSIS")
+        print("=" * 70)
+
+        print(
+            f"Customers analyzed : "
+            f"{self.n_customers:,}"
+        )
+
+        print()
+
+        print(
+            "Number of distinct actions experienced "
+            "per customer:"
+        )
+
+        print()
+
+        for k in range(
+            self.n_actions + 1
+        ):
+
+            count = np.sum(
+                distinct_action_counts == k
+            )
+
+            percentage = (
+                count
+                / self.n_customers
+            )
+
+            print(
+                f"{k} distinct actions : "
+                f"{count:6d} "
+                f"({percentage:6.2%})"
+            )
+
+        print()
+
+        print(
+            f"Mean distinct actions/customer : "
+            f"{np.mean(distinct_action_counts):.3f}"
+        )
+
+        print(
+            f"Median distinct actions/customer : "
+            f"{np.median(distinct_action_counts):.3f}"
+        )
+
+        full_coverage = np.sum(
+            distinct_action_counts
+            == self.n_actions
+        )
+
+        print()
+
+        print(
+            f"Full coverage "
+            f"({self.n_actions}/{self.n_actions}) : "
+            f"{full_coverage:,} "
+            f"({full_coverage / self.n_customers:.2%})"
+        )
+
+        # --------------------------------------------------
+        # Per-action coverage
+        # --------------------------------------------------
+
+        print()
+
+        print(
+            "Coverage of each individual action:"
+        )
+
+        print()
+
+        for action_index in range(
+            self.n_actions
+        ):
+
+            customers_with_action = np.sum(
+                [
+                    action_index in actions
+                    for actions in self.customer_actions
+                ]
+            )
+
+            percentage = (
+                customers_with_action
+                / self.n_customers
+            )
+
+            print(
+                f"Action {action_index} : "
+                f"{customers_with_action:6d} "
+                f"({percentage:6.2%})"
+            )
+
+        print()
+
+        print("=" * 70)
 
 # ============================================================================
 # Main
@@ -315,7 +474,8 @@ def main():
 
     train_env = LoanEnv(
         train_raw,
-        scaler
+        scaler,
+        coverage_mode= True
     )
 
     # =========================================================================
@@ -329,11 +489,24 @@ def main():
     #   ...
     #
     # =========================================================================
+    
+    monitor_env = LoanEnv(
+    train_raw,
+    scaler,
+    coverage_mode=False
+    )
+
 
     checkpoint_callback = CheckpointCallback(
         save_freq=CHECKPOINT_FREQ,
         save_path=CHECKPOINT_DIR,
         name_prefix="dqn_loan"
+    )
+
+    coverage_callback = ActionCoverageCallback(
+    n_customers=len(train_raw),
+    n_actions=train_env.action_space.n,
+    verbose=0,
     )
 
     # =========================================================================
@@ -344,7 +517,7 @@ def main():
     # =========================================================================
 
     q_callback = QValueCallback(
-        eval_env=train_env,
+        eval_env=monitor_env,
         eval_freq=CHECKPOINT_FREQ,
         n_states=100,
         verbose=0
@@ -356,7 +529,8 @@ def main():
 
     callback = CallbackList([
         checkpoint_callback,
-        q_callback
+        q_callback, 
+        coverage_callback
     ])
 
     # =========================================================================
@@ -368,15 +542,15 @@ def main():
     print("Creating DQN model...")
     print("=" * 70)
 
-    model = DQN(
+    model = CoverageDQN(
         policy="MlpPolicy",
         env=train_env,
 
         learning_rate=3e-4,
 
-        buffer_size=10000,
+        buffer_size=420000,
 
-        learning_starts=1000,
+        learning_starts=0,
 
         batch_size=64,
 
@@ -408,6 +582,8 @@ def main():
         total_timesteps=TOTAL_TIMESTEPS,
         callback=callback
     )
+
+    coverage_callback.report()
 
     # =========================================================================
     # Save Final Model

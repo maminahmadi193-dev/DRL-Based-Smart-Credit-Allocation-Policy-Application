@@ -8,7 +8,7 @@ from reward_engine import RewardEngine
 
 class LoanEnv(gym.Env):
 
-    def __init__(self, raw_df, scaler):
+    def __init__(self, raw_df, scaler, coverage_mode = False):
 
         super().__init__()
 
@@ -42,6 +42,17 @@ class LoanEnv(gym.Env):
             shape=(CustomerState.FEATURE_COUNT,),
             dtype=np.float32,
         )
+
+        # ==================================================
+        # Coverage mode
+        # ==================================================
+
+        self.coverage_mode = coverage_mode
+
+        self.coverage_order = None
+        self.coverage_pointer = 0
+        self.coverage_current_index = None
+        self.coverage_seen_actions = set()
 
     def _get_scaled_observation(self):
 
@@ -87,21 +98,109 @@ class LoanEnv(gym.Env):
             ) / 2,
         )
 
+    # def reset(self, seed=None, options=None):
+
+    #     super().reset(seed=seed)
+
+    #     self.current_index = np.random.randint(len(self.raw_df))
+
+    #     raw_row = self.raw_df.iloc[self.current_index]
+
+    #     self.current_customer = self._row_to_customer_state(raw_row)
+
+    #     return self._get_scaled_observation(), {}    
+    
     def reset(self, seed=None, options=None):
 
         super().reset(seed=seed)
 
-        self.current_index = np.random.randint(len(self.raw_df))
+        # ==================================================
+        # Normal mode
+        # ==================================================
 
-        raw_row = self.raw_df.iloc[self.current_index]
+        if not self.coverage_mode:
 
-        self.current_customer = self._row_to_customer_state(raw_row)
+            self.current_index = np.random.randint(
+                len(self.raw_df)
+            )
 
-        return self._get_scaled_observation(), {}    
-    
+        # ==================================================
+        # Coverage mode
+        # ==================================================
+
+        else:
+
+            # Create a random permutation once
+            if self.coverage_order is None:
+
+                self.coverage_order = (
+                    self.np_random.permutation(
+                        len(self.raw_df)
+                    )
+                )
+
+            # First customer
+            if self.coverage_current_index is None:
+
+                self.coverage_current_index = int(
+                    self.coverage_order[
+                        self.coverage_pointer
+                    ]
+                )
+
+            # Current customer has completed all actions
+            elif len(self.coverage_seen_actions) == self.action_space.n:
+
+                self.coverage_pointer += 1
+
+                # One full pass is completed
+                if self.coverage_pointer >= len(
+                    self.coverage_order
+                ):
+
+                    self.coverage_order = (
+                        self.np_random.permutation(
+                            len(self.raw_df)
+                        )
+                    )
+
+                    self.coverage_pointer = 0
+
+                self.coverage_current_index = int(
+                    self.coverage_order[
+                        self.coverage_pointer
+                    ]
+                )
+
+                self.coverage_seen_actions.clear()
+
+            self.current_index = (
+                self.coverage_current_index
+            )
+
+        # ==================================================
+        # Load customer
+        # ==================================================
+
+        raw_row = self.raw_df.iloc[
+            self.current_index
+        ]
+
+        self.current_customer = (
+            self._row_to_customer_state(raw_row)
+        )
+
+        return self._get_scaled_observation(), {}
+
+
     def step(self, action):
         
         action = int(action)
+
+        if self.coverage_mode:
+            self.coverage_seen_actions.add(
+                action
+            )
 
         approved_amount = self.actions[action]
 
@@ -111,12 +210,6 @@ class LoanEnv(gym.Env):
             customer= self.current_customer,
             approved_unsecured_amount= approved_amount
         )
-
-        # reward = self.reward_engine.calculate(
-        #     previous_customer= previous_customer,
-        #     outcome= outcome,
-        #     approved_unsecured_amount= approved_amount
-        # )
 
         reward = self.reward_engine.calculate_expected(
             previous_customer= previous_customer,
@@ -131,6 +224,11 @@ class LoanEnv(gym.Env):
         truncated = False
 
         info = {
+        
+            "customer_index": self.current_index,
+            
+            "action_index": action,
+            
             "approved_amount": approved_amount,
 
             "probability_of_default":
@@ -154,3 +252,25 @@ class LoanEnv(gym.Env):
 
     def render(self):
         print(self.current_customer)
+
+    def get_coverage_action(self):
+
+        unseen_actions = [
+            action_index
+            for action_index in range(
+                self.action_space.n
+            )
+            if action_index not in self.coverage_seen_actions
+        ]
+
+        if not unseen_actions:
+            raise RuntimeError(
+                "No unseen actions remain for "
+                "the current customer."
+            )
+
+        return int(
+            self.np_random.choice(
+                unseen_actions
+            )
+        )
