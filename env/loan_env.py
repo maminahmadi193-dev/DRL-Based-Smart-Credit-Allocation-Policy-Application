@@ -1,9 +1,9 @@
 import gymnasium as gym
 import numpy as np
 
-from .customer_state import CustomerState
-from .customer_simulator import CustomerSimulator
-from .reward_engine import RewardEngine
+from customer_state import CustomerState
+from customer_simulator import CustomerSimulator
+from reward_engine import RewardEngine
 
 
 class LoanEnv(gym.Env):
@@ -112,7 +112,13 @@ class LoanEnv(gym.Env):
             approved_unsecured_amount= approved_amount
         )
 
-        reward = self.reward_engine.calculate(
+        # reward = self.reward_engine.calculate(
+        #     previous_customer= previous_customer,
+        #     outcome= outcome,
+        #     approved_unsecured_amount= approved_amount
+        # )
+
+        reward = self.reward_engine.calculate_expected(
             previous_customer= previous_customer,
             outcome= outcome,
             approved_unsecured_amount= approved_amount

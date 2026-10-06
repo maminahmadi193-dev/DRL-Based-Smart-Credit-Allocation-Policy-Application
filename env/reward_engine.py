@@ -1,6 +1,6 @@
-from .customer_state import CustomerState
-from .simulation_outcome import SimulationOutcome
-
+from customer_state import CustomerState
+from simulation_outcome import SimulationOutcome
+import numpy as np
 
 class RewardEngine:
 
@@ -60,29 +60,62 @@ class RewardEngine:
 
         return self.facility_weight * reward
 
+    # def _need_reward(
+    #     self,
+    #     previous_customer: CustomerState,
+    # ) -> float:
+    #     """
+    #     Estimate customer's financial need.
+
+    #     TODO:
+    #     Replace TotalCustomerScore with
+    #     a dedicated Need Index.
+    #     """
+
+    #     reward = (
+    #         1.0 /
+    #         (
+    #             1.0 +
+    #             self.need_decay *
+    #             previous_customer.total_customer_score
+    #         )
+    #     )
+
+    #     return self.need_weight * reward
+
     def _need_reward(
         self,
         previous_customer: CustomerState,
+        approved_unsecured_amount: float,
     ) -> float:
-        """
-        Estimate customer's financial need.
 
-        TODO:
-        Replace TotalCustomerScore with
-        a dedicated Need Index.
-        """
+        score = np.clip(
+            previous_customer.total_customer_score,
+            0.0,
+            100.0
+        )
 
-        reward = (
-            1.0 /
-            (
-                1.0 +
-                self.need_decay *
-                previous_customer.total_customer_score
+        # Higher score -> lower estimated financial need
+        need_index = 1.0 - score / 100.0
+
+        # Estimated required loan amount
+        min_need = 100_000_000
+        max_need = 500_000_000
+
+        need_amount = (
+            min_need
+            + need_index * (
+                max_need - min_need
             )
         )
 
-        return self.need_weight * reward
+        # Fraction of estimated need that is covered
+        coverage = min(
+            approved_unsecured_amount / need_amount,
+            1.0
+        )
 
+        return self.need_weight * coverage
 
     def _social_reward(
         self,
@@ -96,7 +129,7 @@ class RewardEngine:
         reward = (
             self._history_reward(previous_customer)
             + self._facility_reward(previous_customer)
-            + self._need_reward(previous_customer)
+            + self._need_reward(previous_customer, approved_unsecured_amount)
         )
 
         return reward
@@ -148,3 +181,32 @@ class RewardEngine:
             self._risk_cost(previous_customer, outcome,)
         )
         return reward
+
+    def calculate_expected(
+            self,
+            previous_customer: CustomerState,
+            outcome: SimulationOutcome,
+            approved_unsecured_amount
+
+    ) -> float:
+
+        social_reward = self._social_reward(
+        previous_customer,
+        approved_unsecured_amount
+    )
+
+        risk_penalty = self._risk_penalty(
+            previous_customer,
+            outcome
+        )
+
+        expected_default_penalty = (
+            self.default_cost
+            * outcome.probability_of_default
+        )
+
+        return (
+            social_reward
+            - risk_penalty
+            - expected_default_penalty
+        )

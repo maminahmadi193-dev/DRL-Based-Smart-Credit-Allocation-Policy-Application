@@ -1,5 +1,5 @@
-from .customer_state import CustomerState
-from .simulation_outcome import SimulationOutcome
+from customer_state import CustomerState
+from simulation_outcome import SimulationOutcome
 import numpy as np
 
 
@@ -9,6 +9,7 @@ class CustomerSimulator:
         self,
         alpha=2.0,
         beta=1.0,
+        gamma = 1.0,
         hazard_slope=0.08,
         hazard_center=60,
         max_hazard = 0.005,
@@ -16,6 +17,7 @@ class CustomerSimulator:
     ):
         self.alpha = alpha
         self.beta = beta
+        self.gamma = gamma
 
         self.hazard_slope = hazard_slope
         self.hazard_center = hazard_center
@@ -67,50 +69,141 @@ class CustomerSimulator:
         )
 
         return updated
-    
+
+    # ======================================================
+    # Calculate Capacity Pressure
+    # ======================================================
+
+    def _calculate_capacity_pressure(
+        self,
+        monthly_income: float,
+        approved_unsecured_amount: float,
+        ) -> float:
+
+        if (
+            monthly_income <= 0
+            or approved_unsecured_amount <= 0
+        ):
+            return 0.0
+
+        return (
+            approved_unsecured_amount
+            / (monthly_income + approved_unsecured_amount)
+        )
+        
     # ======================================================
     # Behaviour Models
     # ======================================================
+
+    # def _update_risk(
+    #     self,
+    #     customer: CustomerState,
+    #     previous_customer: CustomerState,
+    #     approved_unsecured_amount: float
+    # ) -> float:
+    #     """
+    #     Estimate customer's new risk after
+    #     state transition.
+    #     """
+
+    #     debt_ratio_change = (
+    #         customer.debt_ratio -
+    #         previous_customer.debt_ratio
+    #     )
+
+    #     if previous_customer.debt_per_loan > 0:
+
+    #         debt_per_loan_change = (
+    #             customer.debt_per_loan -
+    #             previous_customer.debt_per_loan
+    #         ) / previous_customer.debt_per_loan
+
+    #     else:
+
+    #         debt_per_loan_change = 0.0
+
+
+    #     delta_risk = (
+    #         + self.alpha * debt_ratio_change
+    #         + self.beta * debt_per_loan_change
+    #     )
+
+
+    #     updated_risk = (
+    #         previous_customer.risk
+    #         + delta_risk 
+    #     )
+
+
+    #     updated_risk = np.clip(
+    #         updated_risk,
+    #         0.0,
+    #         100.0
+    #     )
+
+    #     return updated_risk
 
     def _update_risk(
         self,
         customer: CustomerState,
         previous_customer: CustomerState,
         approved_unsecured_amount: float
-    ) -> float:
+        ) -> float:
         """
-        Estimate customer's new risk after
-        state transition.
+        Estimate customer's new risk after state transition.
         """
 
+        # --------------------------------------------------
+        # 1. Debt ratio effect
+        # --------------------------------------------------
+
         debt_ratio_change = (
-            customer.debt_ratio -
-            previous_customer.debt_ratio
+            customer.debt_ratio
+            - previous_customer.debt_ratio
         )
+
+        # --------------------------------------------------
+        # 2. Debt per loan effect
+        # --------------------------------------------------
 
         if previous_customer.debt_per_loan > 0:
 
             debt_per_loan_change = (
-                customer.debt_per_loan -
-                previous_customer.debt_per_loan
+                customer.debt_per_loan
+                - previous_customer.debt_per_loan
             ) / previous_customer.debt_per_loan
 
         else:
 
             debt_per_loan_change = 0.0
 
+        # --------------------------------------------------
+        # 3. Repayment capacity pressure
+        # --------------------------------------------------
 
-        delta_risk = (
-            + self.alpha * debt_ratio_change
-            + self.beta * debt_per_loan_change
+        capacity_pressure = self._calculate_capacity_pressure(
+            monthly_income=previous_customer.monthly_income,
+            approved_unsecured_amount=approved_unsecured_amount,
         )
 
+        # --------------------------------------------------
+        # 4. Total risk change
+        # --------------------------------------------------
+
+        delta_risk = (
+            self.alpha * debt_ratio_change
+            + self.beta * debt_per_loan_change
+            + self.gamma * capacity_pressure
+        )
+
+        # --------------------------------------------------
+        # 5. Updated risk
+        # --------------------------------------------------
 
         updated_risk = (
             previous_customer.risk
-            + delta_risk 
+            + delta_risk
         )
-
 
         updated_risk = np.clip(
             updated_risk,

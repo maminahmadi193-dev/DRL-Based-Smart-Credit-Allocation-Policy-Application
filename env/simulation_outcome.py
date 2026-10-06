@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from .customer_state import CustomerState
+from customer_state import CustomerState
 
 
 @dataclass
