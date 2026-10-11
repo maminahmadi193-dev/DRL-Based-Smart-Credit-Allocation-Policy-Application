@@ -3,3 +3,5 @@ __pycache__/
 *.csv
 *.zip
 docs/g10.csv
+.venv/
+.venv312/

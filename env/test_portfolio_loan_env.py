@@ -1,0 +1,461 @@
+
+import unittest
+
+import numpy as np
+import pandas as pd
+
+from sklearn.preprocessing import StandardScaler
+from gymnasium.utils.env_checker import check_env
+
+from customer_state import CustomerState
+from portfolio_loan_env import PortfolioLoanEnv
+
+
+FEATURE_COLUMNS = [
+    "MountlyIncome",
+    "IncomeScore",
+    "JobScore",
+    "AssetScore",
+    "TotalCustomerScore",
+    "TotalFacilities",
+    "DebtAmount",
+    "OriginAmount",
+    "LoanCounts",
+    "DebtRatio",
+    "DebtPerLoan",
+    "Has_No_History",
+    "Employed",
+    "Score_Min",
+    "Score_Max",
+    "Risk_Min",
+    "Risk_Max",
+    "Risk",
+]
+
+
+def make_dataset(n=30):
+    """Create a small deterministic customer dataset."""
+
+    rng = np.random.default_rng(42)
+
+    income = np.linspace(10_000_000, 80_000_000, n)
+    debt = np.linspace(0, 50_000_000, n)
+    loan_counts = np.arange(n) % 5
+
+    origin_amount = np.where(
+        loan_counts > 0,
+        np.maximum(debt, 1.0) * 1.5,
+        0.0,
+    )
+
+    debt_ratio = np.divide(
+        debt,
+        origin_amount,
+        out=np.zeros(n, dtype=float),
+        where=origin_amount > 0,
+    )
+
+    debt_per_loan = np.divide(
+        debt,
+        loan_counts,
+        out=np.zeros(n, dtype=float),
+        where=loan_counts > 0,
+    )
+
+    risk_min = np.linspace(10, 50, n)
+
+    df = pd.DataFrame({
+        "MountlyIncome": income,
+        "IncomeScore": np.linspace(20, 90, n),
+        "JobScore": np.linspace(30, 95, n),
+        "AssetScore": np.linspace(10, 85, n),
+        "TotalCustomerScore": np.linspace(20, 90, n),
+        "TotalFacilities": np.linspace(0, 50_000_000, n),
+        "DebtAmount": debt,
+        "OriginAmount": origin_amount,
+        "LoanCounts": loan_counts,
+        "DebtRatio": debt_ratio,
+        "DebtPerLoan": debt_per_loan,
+        "Has_No_History": (np.arange(n) % 3 == 0).astype(int),
+        "Employed": (np.arange(n) % 4 != 0).astype(int),
+        "Score_Min": np.linspace(400, 600, n),
+        "Score_Max": np.linspace(500, 700, n),
+        "Risk_Min": risk_min,
+        "Risk_Max": risk_min + 5,
+    })
+
+    df["Risk"] = (
+        df["Risk_Min"] + df["Risk_Max"]
+    ) / 2
+
+    # Small variation makes the data suitable for scaler fitting.
+    df["JobScore"] += rng.normal(0, 0.1, size=n)
+
+    scaler = StandardScaler()
+    scaler.fit(df[FEATURE_COLUMNS])
+
+    return df, scaler
+
+
+def make_env(**overrides):
+    df, scaler = make_dataset()
+
+    config = {
+        "initial_budget": 100_000_000,
+        "monthly_capital_injection": 0,
+        "applicants_per_month": 1,
+        "origination_months": 2,
+        "loan_term_months": 2,
+        "monthly_interest_rate": 0.0,
+        "recovery_rate": 0.0,
+    }
+
+    config.update(overrides)
+
+    return PortfolioLoanEnv(
+        raw_df=df,
+        scaler=scaler,
+        **config,
+    )
+
+
+class TestPortfolioLoanEnv(unittest.TestCase):
+
+    def test_reset_returns_valid_observation(self):
+        env = make_env()
+
+        observation, info = env.reset(seed=42)
+
+        expected_features = (
+            CustomerState.FEATURE_COUNT
+            + env.PORTFOLIO_FEATURE_COUNT
+        )
+
+        self.assertEqual(
+            observation.shape,
+            (expected_features,),
+        )
+
+        self.assertEqual(
+            observation.dtype,
+            np.float32,
+        )
+
+        self.assertTrue(
+            env.observation_space.contains(observation)
+        )
+
+        self.assertEqual(info["month"], 1)
+        self.assertEqual(info["phase"], "allocation")
+        self.assertAlmostEqual(
+            info["available_budget"],
+            100_000_000,
+        )
+
+    def test_budget_is_shared_between_applicants(self):
+        env = make_env(
+            initial_budget=100_000_000,
+            applicants_per_month=2,
+            origination_months=1,
+            loan_term_months=2,
+        )
+
+        env.reset(seed=42)
+
+        # The first applicant receives the full budget.
+        _, _, terminated, _, first_info = env.step(1)
+
+        self.assertFalse(terminated)
+        self.assertFalse(first_info["invalid_action"])
+        self.assertEqual(
+            first_info["approved_amount"],
+            100_000_000,
+        )
+
+        # The second applicant requests money that is no longer
+        # available. The environment must not fund that request.
+        _, _, terminated, _, second_info = env.step(1)
+
+        self.assertTrue(second_info["invalid_action"])
+        self.assertEqual(second_info["approved_amount"], 0)
+        self.assertEqual(
+            len(env.portfolio.contracts),
+            1,
+        )
+
+        # One final allocation cohort has finished.
+        self.assertEqual(env.portfolio.month, 2)
+        self.assertEqual(env.phase, "settlement")
+        self.assertFalse(terminated)
+
+    def test_every_origination_month_is_processed(self):
+        env = make_env(
+            applicants_per_month=1,
+            origination_months=3,
+            loan_term_months=2,
+        )
+
+        env.reset(seed=42)
+
+        # Zero-loan actions isolate the calendar logic
+        # from repayments and credit losses.
+        for expected_allocation_month in (1, 2):
+            _, _, terminated, _, info = env.step(0)
+
+            self.assertFalse(terminated)
+            self.assertEqual(info["month"], expected_allocation_month + 1)
+            self.assertEqual(env.phase, "allocation")
+
+        _, _, terminated, _, info = env.step(0)
+
+        self.assertTrue(terminated)
+        self.assertEqual(info["month"], 4)
+        self.assertEqual(env.phase, "settlement")
+
+    def test_settlement_continues_until_contract_matures(self):
+        env = make_env(
+            initial_budget=100_000_000,
+            applicants_per_month=1,
+            origination_months=1,
+            loan_term_months=2,
+        )
+
+        env.reset(seed=42)
+
+        # Grant a single loan in the only origination month.
+        _, _, terminated, _, info = env.step(1)
+
+        self.assertFalse(terminated)
+        self.assertEqual(info["approved_amount"], 100_000_000)
+        self.assertEqual(env.phase, "settlement")
+        self.assertEqual(env.portfolio.month, 2)
+        self.assertGreater(
+            env.portfolio.active_contract_count,
+            0,
+        )
+
+        # During settlement the action is ignored, but the
+        # outstanding contract must continue being serviced.
+        _, _, terminated, _, info = env.step(5)
+
+        self.assertTrue(info["action_ignored"])
+        self.assertTrue(terminated)
+        self.assertEqual(env.portfolio.month, 3)
+        self.assertEqual(env.portfolio.active_contract_count, 0)
+        self.assertEqual(
+            env.portfolio.contracts[0].status,
+            "matured",
+        )
+
+    def test_full_portfolio_episode_and_final_settlement(self):
+        env = make_env(
+            initial_budget=400_000_000,
+            monthly_capital_injection=0,
+            applicants_per_month=2,
+            origination_months=2,
+            loan_term_months=2,
+            monthly_interest_rate=0.0,
+            recovery_rate=0.0,
+        )
+
+        env.reset(seed=42)
+
+        # Disable default risk for this deterministic accounting test.
+        env.portfolio.customer_simulator.max_hazard = 0.0
+
+        initial_budget = env.portfolio.available_budget
+
+        # --------------------------------------------------
+        # Month 1: two applicants receive 100M each.
+        # --------------------------------------------------
+
+        _, _, terminated, _, info = env.step(1)
+
+        self.assertFalse(terminated)
+        self.assertEqual(info["approved_amount"], 100_000_000)
+        self.assertAlmostEqual(
+            env.portfolio.available_budget,
+            300_000_000,
+        )
+
+        _, _, terminated, _, info = env.step(1)
+
+        self.assertFalse(terminated)
+        self.assertEqual(env.portfolio.month, 2)
+        self.assertEqual(env.phase, "allocation")
+
+        # Month 1 loans have made their first instalments.
+        self.assertAlmostEqual(
+            env.portfolio.available_budget,
+            300_000_000,
+            places=4,
+        )
+
+        # --------------------------------------------------
+        # Month 2: another two applicants receive 100M each.
+        # --------------------------------------------------
+
+        _, _, terminated, _, info = env.step(1)
+
+        self.assertFalse(terminated)
+        self.assertAlmostEqual(
+            env.portfolio.available_budget,
+            200_000_000,
+        )
+
+        _, _, terminated, _, info = env.step(1)
+
+        self.assertFalse(terminated)
+        self.assertEqual(env.portfolio.month, 3)
+        self.assertEqual(env.phase, "settlement")
+
+        # The first cohort has matured. The second cohort
+        # still has its final instalment outstanding.
+        self.assertEqual(
+            env.portfolio.active_contract_count,
+            2,
+        )
+
+        self.assertAlmostEqual(
+            env.portfolio.available_budget,
+            300_000_000,
+            places=4,
+        )
+
+        # --------------------------------------------------
+        # Settlement: service the remaining two contracts.
+        # --------------------------------------------------
+
+        _, _, terminated, _, info = env.step(5)
+
+        self.assertTrue(terminated)
+        self.assertTrue(info["action_ignored"])
+        self.assertEqual(env.portfolio.month, 4)
+        self.assertEqual(env.portfolio.active_contract_count, 0)
+
+        self.assertEqual(
+            len(env.portfolio.contracts),
+            4,
+        )
+
+        self.assertAlmostEqual(
+            env.portfolio.total_disbursed,
+            400_000_000,
+            places=4,
+        )
+
+        # With zero interest, zero default risk, and no
+        # capital injections, the original cash is fully restored.
+        self.assertAlmostEqual(
+            env.portfolio.available_budget,
+            initial_budget,
+            places=4,
+        )
+
+        self.assertAlmostEqual(
+            env.portfolio.cumulative_expected_defaults,
+            0.0,
+            places=8,
+        )
+
+        self.assertAlmostEqual(
+            env.portfolio.cumulative_net_default_loss,
+            0.0,
+            places=4,
+        )
+        
+    
+    def test_integrated_interest_and_default_accounting(self):
+        env = make_env(
+            initial_budget=100_000_000,
+            monthly_capital_injection=0,
+            applicants_per_month=1,
+            origination_months=1,
+            loan_term_months=2,
+            monthly_interest_rate=0.01,
+            recovery_rate=0.5,
+        )
+
+        env.reset(seed=42)
+
+        # Use a deliberately elevated hazard for this test only.
+        # This is a stress-test parameter, not a proposed real-world rate.
+        env.portfolio.customer_simulator.max_hazard = 0.02
+
+        initial_cash = env.portfolio.available_budget
+
+        # Grant a loan; the environment processes the first
+        # repayment/default period when the allocation month ends.
+        _, reward_1, terminated, _, info_1 = env.step(1)
+
+        self.assertFalse(terminated)
+        self.assertTrue(np.isfinite(reward_1))
+        self.assertEqual(env.phase, "settlement")
+
+        self.assertGreater(
+            info_1["interest_collected"],
+            0.0,
+        )
+
+        self.assertGreater(
+            info_1["net_default_loss"],
+            0.0,
+        )
+
+        # Settle the remaining contract.
+        _, reward_2, terminated, _, info_2 = env.step(0)
+
+        self.assertTrue(terminated)
+        self.assertTrue(info_2["action_ignored"])
+        self.assertTrue(np.isfinite(reward_2))
+
+        portfolio = env.portfolio
+
+        self.assertGreater(
+            portfolio.cumulative_expected_defaults,
+            0.0,
+        )
+
+        self.assertGreater(
+            portfolio.cumulative_interest_collected,
+            0.0,
+        )
+
+        self.assertGreater(
+            portfolio.cumulative_net_default_loss,
+            0.0,
+        )
+
+        # With no capital injections, final cash should equal
+        # initial cash + interest collected - net credit losses.
+        expected_final_cash = (
+            initial_cash
+            + portfolio.cumulative_interest_collected
+            - portfolio.cumulative_net_default_loss
+        )
+
+        self.assertAlmostEqual(
+            portfolio.available_budget,
+            expected_final_cash,
+            delta=0.01,
+        )
+
+        self.assertEqual(
+            portfolio.contracts[0].status,
+            "matured",
+        )
+
+
+    def test_gymnasium_environment_checker(self):
+        env = make_env(
+            applicants_per_month=2,
+            origination_months=2,
+            loan_term_months=2,
+        )
+
+        # Checks the Gymnasium API and observation/action-space contract.
+        check_env(env, skip_render_check=True)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
