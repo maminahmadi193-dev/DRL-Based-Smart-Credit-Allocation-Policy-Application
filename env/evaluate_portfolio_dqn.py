@@ -1,0 +1,323 @@
+"""Evaluate portfolio DQN models on the same held-out applicants and seeds.
+
+Run from repository root after training both models:
+    python env/evaluate_portfolio_dqn.py --run-names portfolio_dqn_legacy portfolio_dqn_amount_sensitive --episodes 20
+
+The evaluator reports action distributions and computes social/total reward
+under BOTH reward formulas for each policy, allowing fair comparison even
+though the trained agents used different reward designs.
+"""
+
+import argparse
+import json
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+from stable_baselines3 import DQN
+
+from portfolio_experiment_utils import load_split_and_scaler, project_root
+from portfolio_loan_env import PortfolioLoanEnv
+from reward_engine import RewardEngine
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Evaluate one or more portfolio DQN models on common test episodes."
+    )
+    parser.add_argument(
+        "--run-names",
+        nargs="+",
+        required=True,
+        help="Model run folders under models/portfolio_dqn, as created by train_portfolio_dqn.py.",
+    )
+    parser.add_argument("--data", default=None, help="Optional override for the dataset path.")
+    parser.add_argument("--episodes", type=int, default=20)
+    parser.add_argument("--eval-seed", type=int, default=10_000)
+    parser.add_argument("--split", choices=["validation", "test"], default="test")
+    parser.add_argument("--output-dir", default="models/results/portfolio_dqn")
+    return parser.parse_args()
+
+
+def evaluate_episode(run_name, model, config, raw_df, scaler, episode, seed):
+    env = PortfolioLoanEnv(
+        raw_df=raw_df,
+        scaler=scaler,
+        initial_budget=float(config["initial_budget"]),
+        monthly_capital_injection=float(config["monthly_capital_injection"]),
+        applicants_per_month=int(config["applicants_per_month"]),
+        origination_months=int(config["origination_months"]),
+        loan_term_months=int(config["loan_term_months"]),
+        monthly_interest_rate=float(config["monthly_interest_rate"]),
+        recovery_rate=float(config["recovery_rate"]),
+        social_reward_weight=float(config["social_reward_weight"]),
+        financial_reward_weight=float(config["financial_reward_weight"]),
+        financial_reward_scale=float(config["financial_reward_scale"]),
+        invalid_action_penalty=float(config["invalid_action_penalty"]),
+        scale_access_rewards_by_coverage=bool(config["scale_access_rewards_by_coverage"]),
+    )
+
+    legacy_engine = RewardEngine(scale_access_rewards_by_coverage=False)
+    experimental_engine = RewardEngine(scale_access_rewards_by_coverage=True)
+
+    obs, _ = env.reset(seed=seed)
+    env.portfolio.customer_simulator.max_hazard = float(
+        config.get("max_monthly_hazard", 0.005)
+    )
+
+    total_reward_as_trained = 0.0
+    total_legacy_social = 0.0
+    total_experimental_social = 0.0
+    action_counts = np.zeros(len(env.ACTION_AMOUNTS), dtype=np.int64)
+    approved_action_counts = np.zeros(len(env.ACTION_AMOUNTS), dtype=np.int64)
+    invalid_actions = 0
+
+    max_steps = (
+        env.applicants_per_month * env.origination_months
+        + env.loan_term_months + 10
+    )
+
+    terminated = False
+    truncated = False
+    for _ in range(max_steps):
+        customer_before_action = (
+            env.current_customer.copy()
+            if env.phase == "allocation"
+            else None
+        )
+
+        action, _ = model.predict(obs, deterministic=True)
+        action = int(np.asarray(action).reshape(-1)[0])
+
+        obs, reward, terminated, truncated, info = env.step(action)
+        total_reward_as_trained += float(reward)
+
+        if "action_index" in info:
+            action_index = int(info["action_index"])
+            action_counts[action_index] += 1
+            approved_amount = float(info.get("approved_amount", 0.0))
+            if approved_amount > 0:
+                approved_action_counts[action_index] += 1
+                total_legacy_social += legacy_engine._social_reward(
+                    customer_before_action, approved_amount
+                )
+                total_experimental_social += experimental_engine._social_reward(
+                    customer_before_action, approved_amount
+                )
+            if bool(info.get("invalid_action", False)):
+                invalid_actions += 1
+
+        if terminated or truncated:
+            break
+    else:
+        env.close()
+        raise RuntimeError(
+            f"Episode exceeded max_steps={max_steps}; model={run_name}, seed={seed}"
+        )
+
+    portfolio = env.portfolio
+    applicants_seen = env.applicants_per_month * env.origination_months
+    financial_pnl = float(portfolio.cumulative_interest_collected - portfolio.cumulative_net_default_loss)
+    social_weight = float(config["social_reward_weight"])
+    financial_weight = float(config["financial_reward_weight"])
+    financial_scale = float(config["financial_reward_scale"])
+    invalid_penalty = float(config["invalid_action_penalty"])
+
+    total_reward_legacy = (
+        social_weight * total_legacy_social
+        + financial_weight * financial_pnl / financial_scale
+        - invalid_penalty * invalid_actions
+    )
+    total_reward_experimental = (
+        social_weight * total_experimental_social
+        + financial_weight * financial_pnl / financial_scale
+        - invalid_penalty * invalid_actions
+    )
+
+    result = {
+        "run_name": run_name,
+        "reward_mode_used_for_training": config["reward_mode"],
+        "episode": episode,
+        "seed": seed,
+        "split": config.get("evaluation_split", "test"),
+        "total_reward_as_trained": total_reward_as_trained,
+        "total_reward_under_legacy_formula": total_reward_legacy,
+        "total_reward_under_amount_sensitive_formula": total_reward_experimental,
+        "social_reward_legacy": total_legacy_social,
+        "social_reward_amount_sensitive": total_experimental_social,
+        "financial_pnl": financial_pnl,
+        "interest_collected": float(portfolio.cumulative_interest_collected),
+        "net_default_loss": float(portfolio.cumulative_net_default_loss),
+        "expected_default_count": float(portfolio.cumulative_expected_defaults),
+        "principal_collected": float(portfolio.cumulative_principal_collected)
+            if hasattr(portfolio, "cumulative_principal_collected") else np.nan,
+        "loans_granted": int(len(portfolio.contracts)),
+        "loan_approval_rate": len(portfolio.contracts) / applicants_seen if applicants_seen else 0.0,
+        "total_disbursed": float(portfolio.total_disbursed),
+        "average_loan_size": float(portfolio.total_disbursed / len(portfolio.contracts))
+            if portfolio.contracts else 0.0,
+        "invalid_actions": int(invalid_actions),
+        "final_cash": float(portfolio.available_budget),
+        "ending_active_contracts": int(portfolio.active_contract_count),
+        "final_expected_outstanding_principal": float(portfolio.expected_outstanding_principal),
+        "ending_month": int(portfolio.month),
+    }
+
+    for action_index, amount in enumerate(env.ACTION_AMOUNTS):
+        result[f"requested_action_{amount}_count"] = int(action_counts[action_index])
+        result[f"requested_action_{amount}_share"] = (
+            float(action_counts[action_index] / applicants_seen)
+            if applicants_seen else 0.0
+        )
+        result[f"approved_action_{amount}_count"] = int(approved_action_counts[action_index])
+
+    env.close()
+    return result
+
+
+def main():
+    args = parse_args()
+    if args.episodes < 1:
+        raise ValueError("--episodes must be >= 1")
+
+    root = project_root()
+    model_root = root / "models" / "portfolio_dqn"
+
+    run_configs = {}
+    for run_name in args.run_names:
+        run_dir = model_root / run_name
+        model_path = run_dir / "model.zip"
+        config_path = run_dir / "config.json"
+        if not model_path.is_file() or not config_path.is_file():
+            raise FileNotFoundError(
+                f"Missing model or config for {run_name}. "
+                f"Expected {model_path} and {config_path}. Train this run first."
+            )
+        with config_path.open("r", encoding="utf-8") as f:
+            run_configs[run_name] = json.load(f)
+
+    first_config = run_configs[args.run_names[0]]
+    split_seed = int(first_config["split_seed"])
+    dataset_path = args.data or first_config["dataset_path"]
+    train_raw, validation_raw, test_raw, scaler, split_info = load_split_and_scaler(
+        data_path=dataset_path,
+        split_seed=split_seed,
+    )
+
+    for run_name, config in run_configs.items():
+        if int(config["split_seed"]) != split_seed:
+            raise ValueError("Models use different data split seeds; evaluation is not matched.")
+        if Path(config["dataset_path"]).resolve() != Path(split_info["dataset_path"]).resolve():
+            raise ValueError(
+                f"Model {run_name} was trained with a different dataset path. "
+                "Use the same --data file for both experiments."
+            )
+
+    evaluation_raw = validation_raw if args.split == "validation" else test_raw
+    episode_rows = []
+
+    print("=" * 76)
+    print("PORTFOLIO DQN EVALUATION")
+    print("=" * 76)
+    print(f"Dataset         : {split_info['dataset_path']}")
+    print(f"Usable rows     : {split_info['dataset_rows_used']:,}")
+    print(f"Evaluation split: {args.split} ({len(evaluation_raw):,} rows)")
+    print(f"Episodes/model  : {args.episodes}")
+    print(f"Matched seeds   : {args.eval_seed}..{args.eval_seed + args.episodes - 1}")
+    print("-" * 76)
+
+    for run_name in args.run_names:
+        config = run_configs[run_name]
+        model_path = model_root / run_name / "model.zip"
+        model = DQN.load(str(model_path), device="auto")
+        print(f"Evaluating {run_name} | trained reward mode={config['reward_mode']}")
+
+        for episode in range(args.episodes):
+            seed = args.eval_seed + episode
+            result = evaluate_episode(
+                run_name=run_name,
+                model=model,
+                config=config,
+                raw_df=evaluation_raw,
+                scaler=scaler,
+                episode=episode + 1,
+                seed=seed,
+            )
+            result["split"] = args.split
+            episode_rows.append(result)
+            print(
+                f"  episode {episode + 1}/{args.episodes} | seed={seed} | "
+                f"loans={result['loans_granted']} | "
+                f"legacy reward={result['total_reward_under_legacy_formula']:.3f} | "
+                f"experimental reward={result['total_reward_under_amount_sensitive_formula']:.3f}"
+            )
+
+    episodes_df = pd.DataFrame(episode_rows)
+    numeric_metrics = [
+        "total_reward_as_trained",
+        "total_reward_under_legacy_formula",
+        "total_reward_under_amount_sensitive_formula",
+        "social_reward_legacy",
+        "social_reward_amount_sensitive",
+        "financial_pnl",
+        "interest_collected",
+        "net_default_loss",
+        "expected_default_count",
+        "loans_granted",
+        "loan_approval_rate",
+        "total_disbursed",
+        "average_loan_size",
+        "invalid_actions",
+        "final_cash",
+        "ending_active_contracts",
+        "final_expected_outstanding_principal",
+        "ending_month",
+    ]
+    summary_rows = []
+    for run_name, group in episodes_df.groupby("run_name", sort=False):
+        row = {"run_name": run_name, "reward_mode_used_for_training": group["reward_mode_used_for_training"].iloc[0], "episodes": len(group)}
+        for metric in numeric_metrics:
+            row[f"mean_{metric}"] = float(group[metric].mean())
+            row[f"std_{metric}"] = float(group[metric].std(ddof=1)) if len(group) > 1 else 0.0
+        for amount in PortfolioLoanEnv.ACTION_AMOUNTS:
+            row[f"mean_requested_action_{amount}_share"] = float(
+                group[f"requested_action_{amount}_share"].mean()
+            )
+            row[f"mean_approved_action_{amount}_count"] = float(
+                group[f"approved_action_{amount}_count"].mean()
+            )
+        summary_rows.append(row)
+
+    summary_df = pd.DataFrame(summary_rows)
+    output_dir = Path(args.output_dir).expanduser()
+    if not output_dir.is_absolute():
+        output_dir = root / output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    episodes_path = output_dir / f"portfolio_dqn_eval_{args.split}_episodes.csv"
+    summary_path = output_dir / f"portfolio_dqn_eval_{args.split}_summary.csv"
+    episodes_df.to_csv(episodes_path, index=False)
+    summary_df.to_csv(summary_path, index=False)
+
+    display_columns = [
+        "run_name",
+        "reward_mode_used_for_training",
+        "mean_total_reward_under_legacy_formula",
+        "mean_total_reward_under_amount_sensitive_formula",
+        "mean_financial_pnl",
+        "mean_net_default_loss",
+        "mean_loans_granted",
+        "mean_average_loan_size",
+        "mean_final_cash",
+    ]
+    print()
+    print("SUMMARY")
+    print(summary_df[display_columns].to_string(index=False, float_format=lambda value: f"{value:,.3f}"))
+    print("Saved:")
+    print(f"  Episodes: {episodes_path}")
+    print(f"  Summary : {summary_path}")
+    print("Action-distribution columns are included in both outputs.")
+
+
+if __name__ == "__main__":
+    main()
