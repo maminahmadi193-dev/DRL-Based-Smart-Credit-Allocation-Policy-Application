@@ -149,8 +149,12 @@ def calculate_components(df: pd.DataFrame, engine: RewardEngine):
             if amount == 0:
                 continue
 
-            h = float(engine._history_reward(customer))
-            f = float(engine._facility_reward(customer))
+            coverage = engine._need_coverage(customer, float(amount))
+            access_coverage = (
+                coverage if engine.scale_access_rewards_by_coverage else 1.0
+            )
+            h = float(engine._history_reward(customer, coverage=access_coverage))
+            f = float(engine._facility_reward(customer, coverage=access_coverage))
             nd = float(engine._need_reward(customer, float(amount)))
             total = float(engine._social_reward(customer, float(amount)))
 
@@ -254,13 +258,23 @@ def main():
     parser.add_argument("--data", default=None, help="Path to df_cleaned.csv; autodetected if omitted.")
     parser.add_argument("--require-real-data", action="store_true",
                         help="Fail explicitly if the real dataset is not found.")
+    parser.add_argument(
+        "--scale-access-rewards-by-coverage",
+        action="store_true",
+        help=(
+            "Analyze the experimental design that scales history and "
+            "credit-limit rewards by estimated-need coverage."
+        ),
+    )
     parser.add_argument("--output-dir", default=None,
                         help="Output folder; defaults to models/results.")
     args = parser.parse_args()
 
     project_root = Path(__file__).resolve().parents[1]
     df, source_path = load_data(args.data, args.require_real_data, project_root)
-    engine = RewardEngine()
+    engine = RewardEngine(
+        scale_access_rewards_by_coverage=args.scale_access_rewards_by_coverage
+    )
 
     output_dir = Path(args.output_dir) if args.output_dir else project_root / "models" / "results"
     if not output_dir.is_absolute():
@@ -320,6 +334,7 @@ def main():
             "default_cost": engine.default_cost,
             "facility_decay": engine.facility_decay,
             "need_decay": engine.need_decay,
+            "scale_access_rewards_by_coverage": engine.scale_access_rewards_by_coverage,
         },
         "note": (
             "Only social reward components are decomposed. In PortfolioLoanEnv, "
@@ -343,6 +358,7 @@ def main():
 
     print("\n" + "=" * 100)
     print("SOCIAL REWARD COMPONENTS BY LOAN AMOUNT")
+    print("Reward design:", "amount-sensitive access rewards" if engine.scale_access_rewards_by_coverage else "legacy access rewards")
     print("=" * 100)
     print(action_summary[display_columns].to_string(
         index=False, float_format=lambda x: f"{x:,.4f}"
