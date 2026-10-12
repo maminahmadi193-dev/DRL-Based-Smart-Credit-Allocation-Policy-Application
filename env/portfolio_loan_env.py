@@ -58,6 +58,7 @@ class PortfolioLoanEnv(gym.Env):
         financial_reward_weight=1.0,
         financial_reward_scale=100_000_000,
         invalid_action_penalty=0.25,
+        scale_access_rewards_by_coverage=False,
     ):
         super().__init__()
 
@@ -121,7 +122,12 @@ class PortfolioLoanEnv(gym.Env):
             invalid_action_penalty
         )
 
-        self.reward_engine = RewardEngine()
+        self.scale_access_rewards_by_coverage = bool(
+            scale_access_rewards_by_coverage
+        )
+        self.reward_engine = RewardEngine(
+            scale_access_rewards_by_coverage=self.scale_access_rewards_by_coverage
+        )
 
         self.action_space = gym.spaces.Discrete(
             len(self.ACTION_AMOUNTS)
