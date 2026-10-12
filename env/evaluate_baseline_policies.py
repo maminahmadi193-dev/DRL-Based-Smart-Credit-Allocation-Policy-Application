@@ -247,6 +247,9 @@ def evaluate_one_episode(policy: str, episode: int, seed: int, df: pd.DataFrame,
         financial_reward_weight=args.financial_reward_weight,
         financial_reward_scale=args.financial_reward_scale,
         invalid_action_penalty=args.invalid_action_penalty,
+        scale_access_rewards_by_coverage=(
+            args.scale_access_rewards_by_coverage
+        ),
     )
     env.reset(seed=seed)
     env.portfolio.customer_simulator.max_hazard = args.max_hazard
@@ -350,6 +353,14 @@ def parse_args():
     parser.add_argument("--recovery-rate", type=float, default=0.0)
     parser.add_argument("--max-hazard", type=float, default=0.005)
     parser.add_argument("--social-reward-weight", type=float, default=1.0)
+    parser.add_argument(
+        "--scale-access-rewards-by-coverage",
+        action="store_true",
+        help=(
+            "Experimental design: scale history and credit-limit access "
+            "rewards by estimated-need coverage."
+        ),
+    )
     parser.add_argument("--financial-reward-weight", type=float, default=1.0)
     parser.add_argument("--financial-reward-scale", type=float, default=100_000_000)
     parser.add_argument("--invalid-action-penalty", type=float, default=0.25)
@@ -392,6 +403,10 @@ def main():
     print(f"Recovery rate             : {args.recovery_rate:.2%}")
     print(f"Max monthly hazard       : {args.max_hazard:.6f}")
     print(f"Social reward weight     : {args.social_reward_weight}")
+    print(
+        "Reward design            : "
+        + ("amount-sensitive access rewards" if args.scale_access_rewards_by_coverage else "legacy access rewards")
+    )
     print(f"Financial reward weight  : {args.financial_reward_weight}")
     if args.monthly_interest_rate == 0.0 and args.recovery_rate == 0.0:
         print("NOTE: Interest and recovery are both zero, matching the current "
