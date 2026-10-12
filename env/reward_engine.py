@@ -12,7 +12,8 @@ class RewardEngine:
         risk_weight=1.0,
         default_cost=10.0,
         facility_decay=1e-9,
-        need_decay=1e-9
+        need_decay=1e-9,
+        scale_access_rewards_by_coverage=False,
     ):
 
         self.history_reward = history_reward
@@ -28,112 +29,116 @@ class RewardEngine:
         self.facility_decay = facility_decay
 
         self.need_decay = need_decay
+        self.scale_access_rewards_by_coverage = bool(
+            scale_access_rewards_by_coverage
+        )
 
+
+    def _estimated_need_amount(
+        self,
+        previous_customer: CustomerState,
+    ) -> float:
+        """Estimate required loan amount from the current need proxy."""
+
+        score = np.clip(
+            previous_customer.total_customer_score,
+            0.0,
+            100.0,
+        )
+        # Higher score -> lower estimated financial need.
+        need_index = 1.0 - score / 100.0
+        min_need = 100_000_000
+        max_need = 500_000_000
+        return min_need + need_index * (max_need - min_need)
+
+    def _need_coverage(
+        self,
+        previous_customer: CustomerState,
+        approved_unsecured_amount: float,
+    ) -> float:
+        """Return the fraction of estimated need covered, clipped to [0, 1]."""
+        amount = max(0.0, float(approved_unsecured_amount))
+        need_amount = self._estimated_need_amount(previous_customer)
+        return float(min(amount / need_amount, 1.0))
 
     def _history_reward(
         self,
         previous_customer: CustomerState,
+        coverage: float = 1.0,
     ) -> float:
-
+        """Reward new-to-credit customers, optionally scaled by need coverage."""
         if previous_customer.has_no_history:
-            return self.history_reward
-
+            return self.history_reward * float(np.clip(coverage, 0.0, 1.0))
         return 0.0
-                
+
     def _facility_reward(
         self,
         previous_customer: CustomerState,
+        coverage: float = 1.0,
     ) -> float:
         """
-        Reward customers with lower previous access
-        to unsecured facilities.
+        Prioritize customers with a lower unsecured-credit eligibility limit.
+
+        TotalFacilities represents the amount the existing bank credit-scoring
+        system says the customer may qualify for; it is not an amount actually
+        borrowed. In the experimental design, this reward also scales with
+        estimated-need coverage.
         """
-
-        reward = (
-            1.0 /
-            (
-                1.0 +
-                self.facility_decay *
-                previous_customer.total_facilities
-            )
+        eligibility_limit = max(0.0, float(previous_customer.total_facilities))
+        priority = 1.0 / (
+            1.0 + self.facility_decay * eligibility_limit
         )
-
-        return self.facility_weight * reward
-
-    # def _need_reward(
-    #     self,
-    #     previous_customer: CustomerState,
-    # ) -> float:
-    #     """
-    #     Estimate customer's financial need.
-
-    #     TODO:
-    #     Replace TotalCustomerScore with
-    #     a dedicated Need Index.
-    #     """
-
-    #     reward = (
-    #         1.0 /
-    #         (
-    #             1.0 +
-    #             self.need_decay *
-    #             previous_customer.total_customer_score
-    #         )
-    #     )
-
-    #     return self.need_weight * reward
+        return (
+            self.facility_weight
+            * priority
+            * float(np.clip(coverage, 0.0, 1.0))
+        )
 
     def _need_reward(
         self,
         previous_customer: CustomerState,
         approved_unsecured_amount: float,
     ) -> float:
-
-        score = np.clip(
-            previous_customer.total_customer_score,
-            0.0,
-            100.0
+        coverage = self._need_coverage(
+            previous_customer,
+            approved_unsecured_amount,
         )
-
-        # Higher score -> lower estimated financial need
-        need_index = 1.0 - score / 100.0
-
-        # Estimated required loan amount
-        min_need = 100_000_000
-        max_need = 500_000_000
-
-        need_amount = (
-            min_need
-            + need_index * (
-                max_need - min_need
-            )
-        )
-
-        # Fraction of estimated need that is covered
-        coverage = min(
-            approved_unsecured_amount / need_amount,
-            1.0
-        )
-
         return self.need_weight * coverage
 
     def _social_reward(
         self,
         previous_customer: CustomerState,
-        approved_unsecured_amount: float
+        approved_unsecured_amount: float,
     ) -> float:
-
-        if approved_unsecured_amount <= 0 :
+        if approved_unsecured_amount <= 0:
             return 0.0
-    
-        reward = (
-            self._history_reward(previous_customer)
-            + self._facility_reward(previous_customer)
-            + self._need_reward(previous_customer, approved_unsecured_amount)
+
+        coverage = self._need_coverage(
+            previous_customer,
+            approved_unsecured_amount,
+        )
+        # Legacy mode preserves the original amount-independent access
+        # bonuses. Experimental mode ties both access bonuses to coverage.
+        access_coverage = (
+            coverage
+            if self.scale_access_rewards_by_coverage
+            else 1.0
+        )
+        return (
+            self._history_reward(
+                previous_customer,
+                coverage=access_coverage,
+            )
+            + self._facility_reward(
+                previous_customer,
+                coverage=access_coverage,
+            )
+            + self._need_reward(
+                previous_customer,
+                approved_unsecured_amount,
+            )
         )
 
-        return reward
-    
     def _risk_penalty(
             self,
             previous_customer: CustomerState,
