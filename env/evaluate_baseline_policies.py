@@ -261,8 +261,6 @@ def evaluate_one_episode(policy: str, episode: int, seed: int, df: pd.DataFrame,
         ),
     )
     env.reset(seed=seed)
-    env.portfolio.customer_simulator.max_hazard = args.max_hazard
-
     # Keep policy randomness separate from the environment's seeded RNG.
     rng = np.random.default_rng(seed + 100_003)
     total_reward = 0.0
@@ -395,7 +393,6 @@ def parse_args():
         help="Weights for late collections after 1, 2, 3, and 12 months; normalized internally.",
     )
     parser.add_argument("--recovery-rate", type=float, default=0.0, help=argparse.SUPPRESS)
-    parser.add_argument("--max-hazard", type=float, default=0.005)
     parser.add_argument("--social-reward-weight", type=float, default=1.0)
     parser.add_argument(
         "--scale-access-rewards-by-coverage",
@@ -441,8 +438,6 @@ def main():
         raise ValueError("--recovery-rate must be between 0 and 1")
     if not np.isfinite(args.annual_interest_rate) or args.annual_interest_rate < 0:
         raise ValueError("--annual-interest-rate must be finite and non-negative")
-    if not 0.0 <= args.max_hazard:
-        raise ValueError("--max-hazard cannot be negative")
 
     project_root = Path(__file__).resolve().parents[1]
     df, scaler, data_source = load_data(args.data, args.require_real_data, project_root)
@@ -467,7 +462,6 @@ def main():
     print(f"Late installment share    : {args.payment_delay_probability:.1%} (illustrative)")
     print(f"Delay lag weights         : {args.delay_lag_weights}")
     print("Permanent credit loss      : disabled (all delayed installments are eventually collected)")
-    print(f"Max monthly hazard       : {args.max_hazard:.6f}")
     print(f"Social reward weight     : {args.social_reward_weight}")
     print(
         "Reward design            : "
