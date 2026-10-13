@@ -162,7 +162,9 @@ class TestPortfolioSimulator(unittest.TestCase):
             delay_weights=(1.0, 0.0, 0.0, 0.0),
         )
         portfolio.advance_month()
-        portfolio.grant_loan(make_customer(), 300_000, customer_id=1)
+        customer = make_customer()
+        customer.risk = 100.0  # Make the risk-scaled late share equal the configured maximum.
+        portfolio.grant_loan(customer, 300_000, customer_id=1)
 
         # Month 2: the first 100k principal installment is delayed to month 3.
         result = portfolio.advance_month()
@@ -208,7 +210,9 @@ class TestPortfolioSimulator(unittest.TestCase):
             delay_weights=(0.0, 0.0, 0.0, 1.0),
         )
         portfolio.advance_month()
-        portfolio.grant_loan(make_customer(), 300_000, customer_id=1)
+        customer = make_customer()
+        customer.risk = 100.0
+        portfolio.grant_loan(customer, 300_000, customer_id=1)
 
         # Contractual final installment is due in month 2; it will be collected
         # 12 months later, in month 14.
@@ -226,6 +230,35 @@ class TestPortfolioSimulator(unittest.TestCase):
         self.assertTrue(portfolio.is_fully_settled)
         self.assertAlmostEqual(result.principal_collected, 300_000)
         self.assertAlmostEqual(portfolio.available_budget, 1_000_000)
+
+    def test_installment_delay_share_increases_with_customer_risk(self):
+        portfolio = make_portfolio(
+            budget=1_000_000,
+            term=3,
+            delay_probability=0.10,
+        )
+        portfolio.advance_month()
+
+        low_risk_customer = make_customer()
+        low_risk_customer.risk = 20.0
+        high_risk_customer = make_customer()
+        high_risk_customer.risk = 80.0
+
+        low_risk_contract = portfolio.grant_loan(
+            low_risk_customer, 100_000, customer_id="low-risk"
+        )
+        high_risk_contract = portfolio.grant_loan(
+            high_risk_customer, 100_000, customer_id="high-risk"
+        )
+
+        self.assertGreater(
+            high_risk_contract.installment_delay_probability,
+            low_risk_contract.installment_delay_probability,
+        )
+        self.assertLessEqual(
+            high_risk_contract.installment_delay_probability,
+            portfolio.payment_delay_probability,
+        )
 
     def test_recovery_rate_is_rejected_when_full_collection_is_assumed(self):
         with self.assertRaises(ValueError):
