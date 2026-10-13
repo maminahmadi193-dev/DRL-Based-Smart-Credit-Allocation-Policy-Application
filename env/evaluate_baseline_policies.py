@@ -246,6 +246,8 @@ def evaluate_one_episode(policy: str, episode: int, seed: int, df: pd.DataFrame,
         loan_term_months=args.loan_term_months,
         annual_interest_rate=args.annual_interest_rate,
         recovery_rate=args.recovery_rate,
+        payment_delay_probability=args.payment_delay_probability,
+        delay_lag_weights=args.delay_lag_weights,
         social_reward_weight=args.social_reward_weight,
         financial_reward_weight=args.financial_reward_weight,
         financial_reward_scale=args.financial_reward_scale,
@@ -269,7 +271,7 @@ def evaluate_one_episode(policy: str, episode: int, seed: int, df: pd.DataFrame,
 
     max_steps = (
         env.max_applicants_per_month * args.origination_months
-        + args.loan_term_months + 10
+        + args.loan_term_months + env.portfolio.max_delay_months + 10
     )
     terminated = False
     truncated = False
@@ -339,6 +341,22 @@ def summarize(episodes_df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def parse_delay_lag_weights(value):
+    try:
+        weights = tuple(float(part.strip()) for part in value.split(","))
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "Delay lag weights must be comma-separated numbers."
+        ) from exc
+    if len(weights) != 4 or any(not np.isfinite(weight) or weight < 0 for weight in weights):
+        raise argparse.ArgumentTypeError(
+            "Provide four finite, non-negative weights for delays of 1, 2, 3, and 12 months."
+        )
+    if sum(weights) <= 0:
+        raise argparse.ArgumentTypeError("At least one delay lag weight must be positive.")
+    return weights
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Compare four simple baseline policies using PortfolioLoanEnv."
@@ -356,7 +374,19 @@ def parse_args():
     parser.add_argument("--origination-months", type=int, default=12)
     parser.add_argument("--loan-term-months", type=int, choices=[12, 18, 24, 36], default=18)
     parser.add_argument("--annual-interest-rate", type=float, default=0.04, help="Nominal annual interest rate; converted to monthly rate internally.")
-    parser.add_argument("--recovery-rate", type=float, default=0.0)
+    parser.add_argument(
+        "--payment-delay-probability",
+        type=float,
+        default=0.10,
+        help="Illustrative expected share of each installment collected late (not empirically calibrated).",
+    )
+    parser.add_argument(
+        "--delay-lag-weights",
+        type=parse_delay_lag_weights,
+        default=(0.25, 0.25, 0.25, 0.25),
+        help="Weights for late collections after 1, 2, 3, and 12 months; normalized internally.",
+    )
+    parser.add_argument("--recovery-rate", type=float, default=0.0, help=argparse.SUPPRESS)
     parser.add_argument("--max-hazard", type=float, default=0.005)
     parser.add_argument("--social-reward-weight", type=float, default=1.0)
     parser.add_argument(
@@ -426,6 +456,8 @@ def main():
     print(f"Loan term (months)       : {args.loan_term_months}")
     print(f"Annual nominal rate       : {args.annual_interest_rate:.2%}")
     print(f"Monthly rate (derived)    : {args.annual_interest_rate / 12.0:.6%}")
+    print(f"Late installment share    : {args.payment_delay_probability:.1%} (illustrative)")
+    print(f"Delay lag weights         : {args.delay_lag_weights}")
     print(f"Recovery rate             : {args.recovery_rate:.2%}")
     print(f"Max monthly hazard       : {args.max_hazard:.6f}")
     print(f"Social reward weight     : {args.social_reward_weight}")
@@ -434,10 +466,8 @@ def main():
         + ("amount-sensitive access rewards" if args.scale_access_rewards_by_coverage else "legacy access rewards")
     )
     print(f"Financial reward weight  : {args.financial_reward_weight}")
-    if args.annual_interest_rate == 0.0 and args.recovery_rate == 0.0:
-        print("NOTE: Interest and recovery have both been explicitly set to zero "
-              "for this run. Treat the result as a baseline smoke test "
-              "unless those assumptions are intentional.")
+    if args.annual_interest_rate == 0.0 and args.payment_delay_probability == 0.0:
+        print("NOTE: Interest and payment delays are both disabled for this run.")
     if data_source == "synthetic_demo_data":
         print("NOTE: Results use synthetic data, not the real cleaned dataset.")
     print("-" * 76)
