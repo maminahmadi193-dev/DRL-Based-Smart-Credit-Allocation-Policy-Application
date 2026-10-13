@@ -46,9 +46,9 @@ def parse_args():
     parser.add_argument("--initial-budget", type=float, default=1_000_000_000)
     parser.add_argument("--monthly-capital-injection", type=float, default=0.0)
     parser.add_argument("--applicants-per-month", type=int, default=50)
-    parser.add_argument("--origination-months", type=int, default=18)
-    parser.add_argument("--loan-term-months", type=int, default=18)
-    parser.add_argument("--monthly-interest-rate", type=float, default=0.0)
+    parser.add_argument("--origination-months", type=int, default=12)
+    parser.add_argument("--loan-term-months", type=int, choices=[12, 18, 24, 36], default=18, help="Fixed loan term used for all contracts in this run.")
+    parser.add_argument("--annual-interest-rate", type=float, default=0.04, help="Nominal annual interest rate; converted to monthly rate internally.")
     parser.add_argument("--recovery-rate", type=float, default=0.0)
     parser.add_argument("--social-reward-weight", type=float, default=1.0)
     parser.add_argument("--financial-reward-weight", type=float, default=1.0)
@@ -69,8 +69,8 @@ def main():
         raise ValueError("Applicant count and month horizons must be >= 1")
     if args.initial_budget <= 0 or args.financial_reward_scale <= 0:
         raise ValueError("Initial budget and financial reward scale must be positive.")
-    if args.monthly_interest_rate < 0:
-        raise ValueError("--monthly-interest-rate cannot be negative")
+    if args.annual_interest_rate < 0:
+        raise ValueError("--annual-interest-rate cannot be negative")
     if not 0.0 <= args.recovery_rate <= 1.0:
         raise ValueError("--recovery-rate must be between 0 and 1")
 
@@ -110,7 +110,7 @@ def main():
         applicants_per_month=args.applicants_per_month,
         origination_months=args.origination_months,
         loan_term_months=args.loan_term_months,
-        monthly_interest_rate=args.monthly_interest_rate,
+        annual_interest_rate=args.annual_interest_rate,
         recovery_rate=args.recovery_rate,
         social_reward_weight=args.social_reward_weight,
         financial_reward_weight=args.financial_reward_weight,
@@ -166,7 +166,8 @@ def main():
     print(f"Applicants/month       : {args.applicants_per_month}")
     print(f"Origination months     : {args.origination_months}")
     print(f"Loan term              : {args.loan_term_months}")
-    print(f"Monthly interest rate  : {args.monthly_interest_rate:.6f}")
+    print(f"Annual nominal rate    : {args.annual_interest_rate:.2%}")
+    print(f"Monthly rate (derived) : {args.annual_interest_rate / 12.0:.6%}")
     print(f"Recovery rate          : {args.recovery_rate:.2%}")
     print("Max monthly hazard     : 0.005 (PortfolioLoanEnv/CustomerSimulator default)")
     print("-" * 76)
