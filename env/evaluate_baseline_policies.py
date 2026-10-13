@@ -488,6 +488,7 @@ def main():
         "mean_social_reward",
         "mean_financial_pnl",
         "mean_net_default_loss",
+        "mean_applicants_seen",
         "mean_loans_granted",
         "mean_total_disbursed",
         "mean_final_cash",
