@@ -50,6 +50,8 @@ class PortfolioLoanEnv(gym.Env):
         initial_budget=1_000_000_000,
         monthly_capital_injection=0,
         applicants_per_month=50,
+        min_applicants_per_month=None,
+        max_applicants_per_month=None,
         origination_months=12,
         loan_term_months=18,
         annual_interest_rate=0.04,
@@ -70,6 +72,23 @@ class PortfolioLoanEnv(gym.Env):
 
         if applicants_per_month <= 0:
             raise ValueError("applicants_per_month must be positive.")
+
+        if (min_applicants_per_month is None) != (max_applicants_per_month is None):
+            raise ValueError(
+                "min_applicants_per_month and max_applicants_per_month must "
+                "either both be set or both be omitted."
+            )
+
+        if min_applicants_per_month is None:
+            min_applicants_per_month = applicants_per_month
+            max_applicants_per_month = applicants_per_month
+
+        if min_applicants_per_month < 1:
+            raise ValueError("min_applicants_per_month must be positive.")
+        if max_applicants_per_month < min_applicants_per_month:
+            raise ValueError(
+                "max_applicants_per_month must be >= min_applicants_per_month."
+            )
 
         if origination_months <= 0:
             raise ValueError("origination_months must be positive.")
@@ -103,7 +122,11 @@ class PortfolioLoanEnv(gym.Env):
             monthly_capital_injection
         )
 
+        # applicants_per_month remains the fixed-size compatibility value.
+        # Optional min/max values activate a random monthly cohort size.
         self.applicants_per_month = int(applicants_per_month)
+        self.min_applicants_per_month = int(min_applicants_per_month)
+        self.max_applicants_per_month = int(max_applicants_per_month)
         self.origination_months = int(origination_months)
         self.loan_term_months = int(loan_term_months)
 
@@ -154,6 +177,7 @@ class PortfolioLoanEnv(gym.Env):
 
         self.current_cohort_indices = np.array([], dtype=int)
         self.current_applicant_position = 0
+        self.total_applicants_seen = 0
         self.current_customer = None
         self.current_row_index = None
 
@@ -202,11 +226,18 @@ class PortfolioLoanEnv(gym.Env):
         Sampling with replacement allows the dataset to serve
         as an empirical population for repeated simulation.
         """
+        cohort_size = int(
+            self.np_random.integers(
+                self.min_applicants_per_month,
+                self.max_applicants_per_month + 1,
+            )
+        )
         self.current_cohort_indices = self.np_random.choice(
             len(self.raw_df),
-            size=self.applicants_per_month,
+            size=cohort_size,
             replace=True,
         )
+        self.total_applicants_seen += cohort_size
 
         self.current_applicant_position = 0
 
@@ -314,7 +345,7 @@ class PortfolioLoanEnv(gym.Env):
         budget_scale = max(self.initial_budget, 1.0)
 
         maximum_contracts = (
-            self.applicants_per_month
+            self.max_applicants_per_month
             * self.origination_months
         )
 
@@ -329,7 +360,7 @@ class PortfolioLoanEnv(gym.Env):
 
         position_fraction = (
             self.current_applicant_position
-            / self.applicants_per_month
+            / max(len(self.current_cohort_indices), 1)
         )
 
         settlement_flag = float(
@@ -447,6 +478,7 @@ class PortfolioLoanEnv(gym.Env):
         # Start the first allocation month.
         self.portfolio.advance_month()
 
+        self.total_applicants_seen = 0
         self._load_new_cohort()
 
         return self._get_observation(), {
@@ -521,6 +553,7 @@ class PortfolioLoanEnv(gym.Env):
         # ------------------------------------------------------
 
         requested_amount = self.ACTION_AMOUNTS[action]
+        cohort_size = len(self.current_cohort_indices)
 
         row = self.raw_df.iloc[self.current_row_index]
 
@@ -564,7 +597,7 @@ class PortfolioLoanEnv(gym.Env):
 
         cohort_finished = (
             self.current_applicant_position
-            >= self.applicants_per_month
+            >= cohort_size
         )
 
         if not cohort_finished:
@@ -606,6 +639,8 @@ class PortfolioLoanEnv(gym.Env):
             "phase": self.phase,
             "month": self.portfolio.month,
             "customer_index": self.current_row_index,
+            "applicants_in_cohort": cohort_size,
+            "total_applicants_seen": self.total_applicants_seen,
             "action_index": action,
             "requested_amount": requested_amount,
             "approved_amount": approved_amount,
