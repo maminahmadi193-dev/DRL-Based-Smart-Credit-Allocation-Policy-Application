@@ -226,7 +226,6 @@ class PortfolioSimulator:
     @property
     def expected_cash_collections_next_month(self) -> float:
         """Forecast next-month cash receipts from scheduled and delayed payments."""
-        on_time_share = 1.0 - self.payment_delay_probability
         scheduled = 0.0
         for contract in self.contracts:
             if (
@@ -339,8 +338,8 @@ class PortfolioSimulator:
             )
         )
 
-        # Convert the post-origination risk into a monthly hazard.
-        # The hazard remains fixed for this first simulator version.
+        # In this version, customer risk does not imply permanent loss;
+        # installment delays are controlled by the explicit delay scenario.
         monthly_payment = self._calculate_monthly_payment(amount)
 
         contract = LoanContract(
