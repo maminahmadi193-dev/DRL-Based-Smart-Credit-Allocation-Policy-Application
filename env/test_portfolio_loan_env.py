@@ -106,7 +106,7 @@ def make_env(**overrides):
         "applicants_per_month": 1,
         "origination_months": 2,
         "loan_term_months": 2,
-        "monthly_interest_rate": 0.0,
+        "annual_interest_rate": 0.0,
         "recovery_rate": 0.0,
     }
 
@@ -254,7 +254,7 @@ class TestPortfolioLoanEnv(unittest.TestCase):
             applicants_per_month=2,
             origination_months=2,
             loan_term_months=2,
-            monthly_interest_rate=0.0,
+            annual_interest_rate=0.0,
             recovery_rate=0.0,
         )
 
@@ -365,6 +365,69 @@ class TestPortfolioLoanEnv(unittest.TestCase):
         )
         
     
+    def test_annual_nominal_rate_is_converted_to_monthly_rate(self):
+        env = make_env(
+            initial_budget=100_000_000,
+            applicants_per_month=1,
+            origination_months=1,
+            loan_term_months=18,
+            annual_interest_rate=0.04,
+        )
+        env.reset(seed=42)
+        env.portfolio.customer_simulator.max_hazard = 0.0
+
+        _, _, terminated, _, info = env.step(1)
+
+        self.assertFalse(terminated)
+        self.assertAlmostEqual(env.annual_interest_rate, 0.04)
+        self.assertAlmostEqual(env.monthly_interest_rate, 0.04 / 12.0)
+        self.assertAlmostEqual(
+            env.portfolio.contracts[0].monthly_interest_rate,
+            0.04 / 12.0,
+        )
+        self.assertGreater(info["interest_collected"], 0.0)
+
+    def test_one_year_origination_then_settlement_to_longest_maturity(self):
+        env = make_env(
+            initial_budget=1_200_000_000,
+            applicants_per_month=1,
+            origination_months=12,
+            loan_term_months=18,
+            annual_interest_rate=0.0,
+            recovery_rate=0.0,
+        )
+        env.reset(seed=42)
+        env.portfolio.customer_simulator.max_hazard = 0.0
+        initial_cash = env.portfolio.available_budget
+
+        # One new 100M loan in each of the 12 origination months.
+        for _ in range(12):
+            _, _, terminated, _, info = env.step(1)
+            self.assertFalse(terminated)
+
+        self.assertEqual(len(env.portfolio.contracts), 12)
+        self.assertEqual(env.phase, "settlement")
+        self.assertEqual(env.portfolio.month, 13)
+        self.assertEqual(env.portfolio.contracts[0].remaining_months, 6)
+        self.assertEqual(env.portfolio.contracts[-1].remaining_months, 17)
+
+        # No new loans are issued in settlement. The last originated
+        # contract is followed until its 18th payment is processed.
+        for _ in range(17):
+            _, _, terminated, _, info = env.step(0)
+
+        self.assertTrue(terminated)
+        self.assertEqual(env.portfolio.month, 30)
+        self.assertEqual(env.portfolio.active_contract_count, 0)
+        self.assertTrue(
+            all(contract.status == "matured" for contract in env.portfolio.contracts)
+        )
+        self.assertAlmostEqual(
+            env.portfolio.available_budget,
+            initial_cash,
+            places=4,
+        )
+
     def test_integrated_interest_and_default_accounting(self):
         env = make_env(
             initial_budget=100_000_000,
@@ -372,7 +435,7 @@ class TestPortfolioLoanEnv(unittest.TestCase):
             applicants_per_month=1,
             origination_months=1,
             loan_term_months=2,
-            monthly_interest_rate=0.01,
+            annual_interest_rate=0.12,
             recovery_rate=0.5,
         )
 
