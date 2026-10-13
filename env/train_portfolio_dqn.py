@@ -226,7 +226,6 @@ def main():
     print(f"Delay lags (months)    : { (1, 2, 3, 12) }")
     print(f"Delay lag weights      : {args.delay_lag_weights}")
     print("Permanent credit loss  : disabled (all delayed installments are eventually collected)")
-    print("Max monthly hazard     : 0.005 (PortfolioLoanEnv/CustomerSimulator default)")
     print("-" * 76)
 
     try:
