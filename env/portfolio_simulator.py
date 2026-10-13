@@ -88,7 +88,7 @@ class PortfolioSimulator:
         monthly_interest_rate: float = 0.0,
         recovery_rate: float = 0.0,
         payment_delay_probability: float = 0.0,
-        delay_lag_weights=(0.4, 0.3, 0.2, 0.1),
+        delay_lag_weights=(0.25, 0.25, 0.25, 0.25),
         customer_simulator: Optional[CustomerSimulator] = None,
     ):
         if not math.isfinite(initial_budget) or initial_budget < 0:
