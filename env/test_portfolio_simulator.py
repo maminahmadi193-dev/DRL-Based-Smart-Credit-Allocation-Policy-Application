@@ -243,8 +243,7 @@ class TestPortfolioSimulator(unittest.TestCase):
             budget=initial_budget,
             term=term,
             rate=0.01,
-            hazard=0,
-            recovery=0,
+            delay_probability=0.0,
         )
 
         portfolio.advance_month()
