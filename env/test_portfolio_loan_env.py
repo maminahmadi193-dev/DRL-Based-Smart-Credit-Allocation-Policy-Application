@@ -152,6 +152,20 @@ class TestPortfolioLoanEnv(unittest.TestCase):
             100_000_000,
         )
 
+    def test_info_customer_index_matches_the_decision_customer(self):
+        env = make_env(
+            applicants_per_month=2,
+            origination_months=1,
+            loan_term_months=2,
+        )
+        env.reset(seed=42)
+        expected_customer_index = env.current_row_index
+
+        _, _, _, _, info = env.step(0)
+
+        self.assertEqual(info["customer_index"], expected_customer_index)
+        env.close()
+
     def test_budget_is_shared_between_applicants(self):
         env = make_env(
             initial_budget=100_000_000,
@@ -374,7 +388,16 @@ class TestPortfolioLoanEnv(unittest.TestCase):
                 origination_months=6,
                 loan_term_months=2,
             )
-            env.reset(seed=seed)
+            initial_obs, _ = env.reset(seed=seed)
+            self.assertEqual(
+                initial_obs.shape,
+                (CustomerState.FEATURE_COUNT + env.PORTFOLIO_FEATURE_COUNT,),
+            )
+            self.assertEqual(env.PORTFOLIO_FEATURE_COUNT, 16)
+            self.assertAlmostEqual(
+                float(initial_obs[CustomerState.FEATURE_COUNT + 3]),
+                len(env.current_cohort_indices) / env.max_applicants_per_month,
+            )
             sizes = []
 
             while env.phase == "allocation":
