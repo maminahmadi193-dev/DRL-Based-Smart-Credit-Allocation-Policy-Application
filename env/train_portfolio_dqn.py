@@ -20,6 +20,22 @@ from portfolio_experiment_utils import load_split_and_scaler, project_root
 from portfolio_loan_env import PortfolioLoanEnv
 
 
+def parse_delay_lag_weights(value):
+    try:
+        weights = tuple(float(part.strip()) for part in value.split(","))
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "Delay lag weights must be comma-separated numbers."
+        ) from exc
+    if len(weights) != 4 or any(not math.isfinite(weight) or weight < 0 for weight in weights):
+        raise argparse.ArgumentTypeError(
+            "Provide four finite, non-negative weights for delays of 1, 2, 3, and 12 months."
+        )
+    if sum(weights) <= 0:
+        raise argparse.ArgumentTypeError("At least one delay lag weight must be positive.")
+    return weights
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Train a DQN agent using PortfolioLoanEnv."
@@ -52,7 +68,19 @@ def parse_args():
     parser.add_argument("--origination-months", type=int, default=12)
     parser.add_argument("--loan-term-months", type=int, choices=[12, 18, 24, 36], default=18, help="Fixed loan term used for all contracts in this run.")
     parser.add_argument("--annual-interest-rate", type=float, default=0.04, help="Nominal annual interest rate; converted to monthly rate internally.")
-    parser.add_argument("--recovery-rate", type=float, default=0.0)
+    parser.add_argument(
+        "--payment-delay-probability",
+        type=float,
+        default=0.10,
+        help="Illustrative expected share of each installment collected late (not empirically calibrated).",
+    )
+    parser.add_argument(
+        "--delay-lag-weights",
+        type=parse_delay_lag_weights,
+        default=(0.25, 0.25, 0.25, 0.25),
+        help="Weights for late collections after 1, 2, 3, and 12 months; normalized internally.",
+    )
+    parser.add_argument("--recovery-rate", type=float, default=0.0, help=argparse.SUPPRESS)
     parser.add_argument("--social-reward-weight", type=float, default=1.0)
     parser.add_argument("--financial-reward-weight", type=float, default=1.0)
     parser.add_argument("--financial-reward-scale", type=float, default=100_000_000)
@@ -92,6 +120,10 @@ def main():
         raise ValueError("Initial budget and financial reward scale must be positive.")
     if not math.isfinite(args.annual_interest_rate) or args.annual_interest_rate < 0:
         raise ValueError("--annual-interest-rate must be finite and non-negative")
+    if not math.isfinite(args.payment_delay_probability) or not 0.0 <= args.payment_delay_probability <= 1.0:
+        raise ValueError("--payment-delay-probability must be between 0 and 1")
+    if sum(args.delay_lag_weights) <= 0:
+        raise ValueError("--delay-lag-weights must sum to a positive value")
     if not 0.0 <= args.recovery_rate <= 1.0:
         raise ValueError("--recovery-rate must be between 0 and 1")
 
@@ -135,6 +167,8 @@ def main():
         loan_term_months=args.loan_term_months,
         annual_interest_rate=args.annual_interest_rate,
         recovery_rate=args.recovery_rate,
+        payment_delay_probability=args.payment_delay_probability,
+        delay_lag_weights=args.delay_lag_weights,
         social_reward_weight=args.social_reward_weight,
         financial_reward_weight=args.financial_reward_weight,
         financial_reward_scale=args.financial_reward_scale,
@@ -191,6 +225,9 @@ def main():
     print(f"Loan term              : {args.loan_term_months}")
     print(f"Annual nominal rate    : {args.annual_interest_rate:.2%}")
     print(f"Monthly rate (derived) : {args.annual_interest_rate / 12.0:.6%}")
+    print(f"Late installment share : {args.payment_delay_probability:.1%} (illustrative)")
+    print(f"Delay lags (months)    : { (1, 2, 3, 12) }")
+    print(f"Delay lag weights      : {args.delay_lag_weights}")
     print(f"Recovery rate          : {args.recovery_rate:.2%}")
     print("Max monthly hazard     : 0.005 (PortfolioLoanEnv/CustomerSimulator default)")
     print("-" * 76)
