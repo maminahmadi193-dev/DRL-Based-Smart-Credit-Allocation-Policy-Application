@@ -84,6 +84,7 @@ METRICS = (
     "net_default_loss",
     "expected_default_count",
     "principal_collected",
+    "applicants_seen",
     "loans_granted",
     "loan_approval_rate",
     "total_disbursed",
@@ -239,6 +240,8 @@ def evaluate_one_episode(policy: str, episode: int, seed: int, df: pd.DataFrame,
         initial_budget=args.initial_budget,
         monthly_capital_injection=args.monthly_capital_injection,
         applicants_per_month=args.applicants_per_month,
+        min_applicants_per_month=args.min_applicants_per_month,
+        max_applicants_per_month=args.max_applicants_per_month,
         origination_months=args.origination_months,
         loan_term_months=args.loan_term_months,
         annual_interest_rate=args.annual_interest_rate,
@@ -265,7 +268,7 @@ def evaluate_one_episode(policy: str, episode: int, seed: int, df: pd.DataFrame,
     invalid_actions = 0
 
     max_steps = (
-        args.applicants_per_month * args.origination_months
+        env.max_applicants_per_month * args.origination_months
         + args.loan_term_months + 10
     )
     terminated = False
@@ -293,7 +296,7 @@ def evaluate_one_episode(policy: str, episode: int, seed: int, df: pd.DataFrame,
 
     portfolio = env.portfolio
     loans_granted = len(portfolio.contracts)
-    applicants_seen = args.applicants_per_month * args.origination_months
+    applicants_seen = env.total_applicants_seen
     total_disbursed = float(portfolio.total_disbursed)
 
     result = {
@@ -309,6 +312,7 @@ def evaluate_one_episode(policy: str, episode: int, seed: int, df: pd.DataFrame,
         "net_default_loss": float(portfolio.cumulative_net_default_loss),
         "expected_default_count": float(portfolio.cumulative_expected_defaults),
         "principal_collected": principal_collected,
+        "applicants_seen": int(applicants_seen),
         "loans_granted": loans_granted,
         "loan_approval_rate": loans_granted / applicants_seen if applicants_seen else 0.0,
         "total_disbursed": total_disbursed,
@@ -346,7 +350,9 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=42, help="Base seed; all policies use matching episode seeds.")
     parser.add_argument("--initial-budget", type=float, default=1_000_000_000)
     parser.add_argument("--monthly-capital-injection", type=float, default=0.0)
-    parser.add_argument("--applicants-per-month", type=int, default=50)
+    parser.add_argument("--applicants-per-month", type=int, default=50, help="Fixed monthly cohort size used when min/max are omitted.")
+    parser.add_argument("--min-applicants-per-month", type=int, default=30)
+    parser.add_argument("--max-applicants-per-month", type=int, default=70)
     parser.add_argument("--origination-months", type=int, default=12)
     parser.add_argument("--loan-term-months", type=int, choices=[12, 18, 24, 36], default=18)
     parser.add_argument("--annual-interest-rate", type=float, default=0.04, help="Nominal annual interest rate; converted to monthly rate internally.")
@@ -374,6 +380,10 @@ def main():
         raise ValueError("--episodes must be >= 1")
     if args.applicants_per_month < 1 or args.origination_months < 1 or args.loan_term_months < 1:
         raise ValueError("Applicant count and both month horizons must be >= 1")
+    if args.min_applicants_per_month < 1:
+        raise ValueError("--min-applicants-per-month must be >= 1")
+    if args.max_applicants_per_month < args.min_applicants_per_month:
+        raise ValueError("--max-applicants-per-month must be >= min-applicants-per-month")
     if not 0.0 <= args.recovery_rate <= 1.0:
         raise ValueError("--recovery-rate must be between 0 and 1")
     if not np.isfinite(args.annual_interest_rate) or args.annual_interest_rate < 0:
@@ -396,7 +406,7 @@ def main():
     print(f"Usable dataset rows      : {len(df):,}")
     print(f"Episodes per policy      : {args.episodes}")
     print(f"Initial budget           : {args.initial_budget:,.0f}")
-    print(f"Applicants/month         : {args.applicants_per_month}")
+    print(f"Applicants/month range   : {args.min_applicants_per_month}..{args.max_applicants_per_month} (uniform, inclusive)")
     print(f"Origination months       : {args.origination_months}")
     print(f"Loan term (months)       : {args.loan_term_months}")
     print(f"Annual nominal rate       : {args.annual_interest_rate:.2%}")
