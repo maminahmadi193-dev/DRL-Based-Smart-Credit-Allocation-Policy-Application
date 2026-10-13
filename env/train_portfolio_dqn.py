@@ -176,9 +176,6 @@ def main():
         scale_access_rewards_by_coverage=args.scale_access_rewards_by_coverage,
     )
 
-    # The simulator defaults to a monthly hazard of 0.005. PortfolioLoanEnv
-    # recreates the simulator on reset, so we keep this experiment on that
-    # existing default instead of setting a transient per-reset value.
     model = DQN(
         policy="MlpPolicy",
         env=env,
@@ -251,7 +248,6 @@ def main():
                 else "legacy"
             ),
             "environment_class": "PortfolioLoanEnv",
-            "max_monthly_hazard": 0.005,
             **split_info,
         })
         config_path = run_dir / "config.json"
