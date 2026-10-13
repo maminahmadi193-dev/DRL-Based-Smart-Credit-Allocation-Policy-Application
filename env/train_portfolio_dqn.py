@@ -46,9 +46,9 @@ def parse_args():
     parser.add_argument("--checkpoint-freq", type=int, default=50_000)
     parser.add_argument("--initial-budget", type=float, default=1_000_000_000)
     parser.add_argument("--monthly-capital-injection", type=float, default=0.0)
-    parser.add_argument("--applicants-per-month", type=int, default=50, help="Fixed monthly cohort size used when min/max are omitted.")
-    parser.add_argument("--min-applicants-per-month", type=int, default=30, help="Minimum monthly cohort size (inclusive). Set equal to max for fixed-size cohorts.")
-    parser.add_argument("--max-applicants-per-month", type=int, default=70, help="Maximum monthly cohort size (inclusive).")
+    parser.add_argument("--applicants-per-month", type=int, default=None, help="Legacy fixed cohort size. When supplied alone, monthly cohort size is fixed.")
+    parser.add_argument("--min-applicants-per-month", type=int, default=None, help="Minimum monthly cohort size (inclusive); default range is 30..70.")
+    parser.add_argument("--max-applicants-per-month", type=int, default=None, help="Maximum monthly cohort size (inclusive).")
     parser.add_argument("--origination-months", type=int, default=12)
     parser.add_argument("--loan-term-months", type=int, choices=[12, 18, 24, 36], default=18, help="Fixed loan term used for all contracts in this run.")
     parser.add_argument("--annual-interest-rate", type=float, default=0.04, help="Nominal annual interest rate; converted to monthly rate internally.")
@@ -63,6 +63,20 @@ def parse_args():
 
 def main():
     args = parse_args()
+
+    # Default to an illustrative random range, but preserve the old
+    # --applicants-per-month interface as a fixed-size override.
+    if args.min_applicants_per_month is None and args.max_applicants_per_month is None:
+        if args.applicants_per_month is None:
+            args.min_applicants_per_month, args.max_applicants_per_month = 30, 70
+        else:
+            args.min_applicants_per_month = args.applicants_per_month
+            args.max_applicants_per_month = args.applicants_per_month
+    elif args.min_applicants_per_month is None or args.max_applicants_per_month is None:
+        raise ValueError("Set both --min-applicants-per-month and --max-applicants-per-month.")
+
+    if args.applicants_per_month is None:
+        args.applicants_per_month = (args.min_applicants_per_month + args.max_applicants_per_month) // 2
 
     if args.timesteps < 1:
         raise ValueError("--timesteps must be >= 1")
