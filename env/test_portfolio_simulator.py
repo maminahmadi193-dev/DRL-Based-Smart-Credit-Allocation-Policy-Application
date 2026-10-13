@@ -1,21 +1,9 @@
 
-import math
 import unittest
 
 from customer_state import CustomerState
 from customer_simulator import CustomerSimulator
 from portfolio_simulator import PortfolioSimulator
-
-
-class FixedHazardSimulator(CustomerSimulator):
-    """Deterministic hazard model for repeatable unit tests."""
-
-    def __init__(self, hazard):
-        super().__init__()
-        self.fixed_hazard = hazard
-
-    def _estimate_hazard(self, customer):
-        return self.fixed_hazard
 
 
 def make_customer():
