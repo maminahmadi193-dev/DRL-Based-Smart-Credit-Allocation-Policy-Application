@@ -338,8 +338,16 @@ class PortfolioSimulator:
             )
         )
 
-        # In this version, customer risk does not imply permanent loss;
-        # installment delays are controlled by the explicit delay scenario.
+        # Customer risk changes the expected share of the installment paid late.
+        # This is a transparent linear proxy, not an empirically calibrated PD model.
+        risk_factor = min(
+            1.0,
+            max(0.0, float(customer_after_loan.risk) / 100.0),
+        )
+        installment_delay_probability = (
+            self.payment_delay_probability * risk_factor
+        )
+
         monthly_payment = self._calculate_monthly_payment(amount)
 
         contract = LoanContract(
@@ -350,7 +358,7 @@ class PortfolioSimulator:
             outstanding_principal=amount,
             monthly_payment=monthly_payment,
             monthly_interest_rate=self.monthly_interest_rate,
-            installment_delay_probability=self.payment_delay_probability,
+            installment_delay_probability=installment_delay_probability,
             term_months=self.loan_term_months,
             remaining_months=self.loan_term_months,
         )
