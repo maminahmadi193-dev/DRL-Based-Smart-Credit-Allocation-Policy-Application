@@ -410,8 +410,8 @@ def main():
     )
     print(f"Financial reward weight  : {args.financial_reward_weight}")
     if args.annual_interest_rate == 0.0 and args.recovery_rate == 0.0:
-        print("NOTE: Interest and recovery are both zero, matching the current "
-              "environment defaults. Treat the result as a baseline smoke test "
+        print("NOTE: Interest and recovery have both been explicitly set to zero "
+              "for this run. Treat the result as a baseline smoke test "
               "unless those assumptions are intentional.")
     if data_source == "synthetic_demo_data":
         print("NOTE: Results use synthetic data, not the real cleaned dataset.")
