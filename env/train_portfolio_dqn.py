@@ -228,7 +228,7 @@ def main():
     print(f"Late installment share : {args.payment_delay_probability:.1%} (illustrative)")
     print(f"Delay lags (months)    : { (1, 2, 3, 12) }")
     print(f"Delay lag weights      : {args.delay_lag_weights}")
-    print(f"Recovery rate          : {args.recovery_rate:.2%}")
+    print("Permanent credit loss  : disabled (all delayed installments are eventually collected)")
     print("Max monthly hazard     : 0.005 (PortfolioLoanEnv/CustomerSimulator default)")
     print("-" * 76)
 
