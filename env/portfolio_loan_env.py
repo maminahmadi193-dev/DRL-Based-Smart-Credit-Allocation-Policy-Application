@@ -25,7 +25,8 @@ class PortfolioLoanEnv(gym.Env):
     are serviced until they mature or become depleted.
 
     Important:
-    - Default and repayments are modeled in expectation.
+    - Payment timing and collections are modeled in expectation.
+    - This scenario assumes all contractual amounts are ultimately collected.
     - During settlement, actions are ignored.
     """
 
