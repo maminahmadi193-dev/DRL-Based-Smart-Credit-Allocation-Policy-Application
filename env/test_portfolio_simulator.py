@@ -45,16 +45,17 @@ def make_portfolio(
     budget=1_000_000,
     term=3,
     rate=0.0,
-    hazard=0.0,
-    recovery=0.0,
+    delay_probability=0.0,
+    delay_weights=(0.25, 0.25, 0.25, 0.25),
 ):
     return PortfolioSimulator(
         initial_budget=budget,
         monthly_capital_injection=0,
         loan_term_months=term,
         monthly_interest_rate=rate,
-        recovery_rate=recovery,
-        customer_simulator=FixedHazardSimulator(hazard),
+        payment_delay_probability=delay_probability,
+        delay_lag_weights=delay_weights,
+        customer_simulator=CustomerSimulator(),
     )
 
 
@@ -152,69 +153,87 @@ class TestPortfolioSimulator(unittest.TestCase):
             places=5,
         )
 
-    def test_expected_default_and_recovery(self):
-        hazard = 0.1
-        recovery_rate = 0.5
-
+    def test_delayed_installments_are_eventually_collected_without_credit_loss(self):
         portfolio = make_portfolio(
             budget=1_000_000,
             term=3,
-            rate=0,
-            hazard=hazard,
-            recovery=recovery_rate,
+            rate=0.0,
+            delay_probability=1.0,
+            delay_weights=(1.0, 0.0, 0.0, 0.0),
         )
         portfolio.advance_month()
+        portfolio.grant_loan(make_customer(), 300_000, customer_id=1)
 
-        portfolio.grant_loan(
-            make_customer(),
-            300_000,
-            customer_id=1,
-        )
-
+        # Month 2: the first 100k principal installment is delayed to month 3.
         result = portfolio.advance_month()
+        self.assertAlmostEqual(result.principal_collected, 0.0)
+        self.assertAlmostEqual(result.delayed_payment_amount_scheduled, 100_000)
+        self.assertAlmostEqual(result.pending_delayed_receivables, 100_000)
+        self.assertFalse(portfolio.is_fully_settled)
+        self.assertAlmostEqual(portfolio.available_budget, 700_000)
 
-        expected_default_probability = 1 - math.exp(-hazard)
-        expected_defaulted_principal = (
-            300_000 * expected_default_probability
-        )
-        expected_recovery = (
-            expected_defaulted_principal * recovery_rate
-        )
-        expected_net_loss = (
-            expected_defaulted_principal - expected_recovery
-        )
+        # Month 3: collect installment 1 and delay installment 2 to month 4.
+        result = portfolio.advance_month()
+        self.assertAlmostEqual(result.principal_collected, 100_000)
+        self.assertAlmostEqual(result.delayed_payment_amount_collected, 100_000)
+        self.assertAlmostEqual(result.delayed_payment_amount_scheduled, 100_000)
+        self.assertAlmostEqual(result.pending_delayed_receivables, 100_000)
 
+        # Month 4: the contractual loan matures but its last delayed payment
+        # is still due in month 5, so portfolio settlement is not complete.
+        result = portfolio.advance_month()
+        self.assertEqual(portfolio.contracts[0].status, "matured")
+        self.assertEqual(portfolio.active_contract_count, 0)
+        self.assertFalse(portfolio.is_fully_settled)
+        self.assertAlmostEqual(result.pending_delayed_receivables, 100_000)
+
+        # Month 5: collect the final delayed amount.
+        result = portfolio.advance_month()
+        self.assertTrue(portfolio.is_fully_settled)
+        self.assertAlmostEqual(result.principal_collected, 100_000)
+        self.assertAlmostEqual(portfolio.cumulative_principal_collected, 300_000)
         self.assertAlmostEqual(
-            result.expected_default_count,
-            expected_default_probability,
-            places=7,
+            portfolio.cumulative_delayed_payment_amount_scheduled,
+            portfolio.cumulative_delayed_payment_amount_collected,
         )
+        self.assertAlmostEqual(portfolio.cumulative_net_default_loss, 0.0)
+        self.assertAlmostEqual(portfolio.available_budget, 1_000_000)
 
-        self.assertAlmostEqual(
-            result.gross_defaulted_principal,
-            expected_defaulted_principal,
-            places=5,
+    def test_twelve_month_delay_extends_settlement_after_contract_maturity(self):
+        portfolio = make_portfolio(
+            budget=1_000_000,
+            term=1,
+            rate=0.0,
+            delay_probability=1.0,
+            delay_weights=(0.0, 0.0, 0.0, 1.0),
         )
+        portfolio.advance_month()
+        portfolio.grant_loan(make_customer(), 300_000, customer_id=1)
 
-        self.assertAlmostEqual(
-            result.recovery_collected,
-            expected_recovery,
-            places=5,
-        )
+        # Contractual final installment is due in month 2; it will be collected
+        # 12 months later, in month 14.
+        portfolio.advance_month()
+        self.assertEqual(portfolio.month, 2)
+        self.assertEqual(portfolio.contracts[0].status, "matured")
+        self.assertEqual(portfolio.max_delay_months, 12)
+        self.assertFalse(portfolio.is_fully_settled)
+        self.assertAlmostEqual(portfolio.pending_delayed_receivables, 300_000)
 
-        self.assertAlmostEqual(
-            result.net_default_loss,
-            expected_net_loss,
-            places=5,
-        )
+        for _ in range(12):
+            result = portfolio.advance_month()
 
-        self.assertAlmostEqual(
-            result.financial_pnl,
-            -expected_net_loss,
-            places=5,
-        )
+        self.assertEqual(portfolio.month, 14)
+        self.assertTrue(portfolio.is_fully_settled)
+        self.assertAlmostEqual(result.principal_collected, 300_000)
+        self.assertAlmostEqual(portfolio.available_budget, 1_000_000)
 
-    
+    def test_recovery_rate_is_rejected_when_full_collection_is_assumed(self):
+        with self.assertRaises(ValueError):
+            PortfolioSimulator(
+                initial_budget=1_000_000,
+                recovery_rate=0.5,
+            )
+
     def test_positive_interest_loan_amortizes_correctly(self):
         principal = 300_000
         term = 3
