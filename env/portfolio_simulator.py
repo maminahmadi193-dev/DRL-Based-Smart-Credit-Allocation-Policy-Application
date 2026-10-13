@@ -227,13 +227,25 @@ class PortfolioSimulator:
     def expected_cash_collections_next_month(self) -> float:
         """Forecast next-month cash receipts from scheduled and delayed payments."""
         on_time_share = 1.0 - self.payment_delay_probability
-        scheduled = sum(
-            contract.monthly_payment * on_time_share
-            for contract in self.contracts
-            if contract.status == "active"
-            and contract.remaining_months > 0
-            and contract.origin_month <= self.month
-        )
+        scheduled = 0.0
+        for contract in self.contracts:
+            if (
+                contract.status != "active"
+                or contract.remaining_months <= 0
+                or contract.origin_month > self.month
+            ):
+                continue
+            balance = contract.outstanding_principal
+            interest_due = balance * contract.monthly_interest_rate
+            if contract.remaining_months == 1:
+                principal_due = balance
+            else:
+                principal_due = min(
+                    balance,
+                    max(0.0, contract.monthly_payment - interest_due),
+                )
+            on_time_share = 1.0 - contract.installment_delay_probability
+            scheduled += (principal_due + interest_due) * on_time_share
         delayed = self._delayed_receivables.get(self.month + 1, {})
         return scheduled + delayed.get("principal", 0.0) + delayed.get("interest", 0.0)
 
