@@ -48,7 +48,7 @@ def evaluate_episode(run_name, model, config, raw_df, scaler, episode, seed):
         applicants_per_month=int(config["applicants_per_month"]),
         origination_months=int(config["origination_months"]),
         loan_term_months=int(config["loan_term_months"]),
-        monthly_interest_rate=float(config["monthly_interest_rate"]),
+        annual_interest_rate=float(config.get("annual_interest_rate", float(config.get("monthly_interest_rate", 0.0)) * 12.0)),
         recovery_rate=float(config["recovery_rate"]),
         social_reward_weight=float(config["social_reward_weight"]),
         financial_reward_weight=float(config["financial_reward_weight"]),
