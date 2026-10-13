@@ -46,7 +46,9 @@ def parse_args():
     parser.add_argument("--checkpoint-freq", type=int, default=50_000)
     parser.add_argument("--initial-budget", type=float, default=1_000_000_000)
     parser.add_argument("--monthly-capital-injection", type=float, default=0.0)
-    parser.add_argument("--applicants-per-month", type=int, default=50)
+    parser.add_argument("--applicants-per-month", type=int, default=50, help="Fixed monthly cohort size used when min/max are omitted.")
+    parser.add_argument("--min-applicants-per-month", type=int, default=30, help="Minimum monthly cohort size (inclusive). Set equal to max for fixed-size cohorts.")
+    parser.add_argument("--max-applicants-per-month", type=int, default=70, help="Maximum monthly cohort size (inclusive).")
     parser.add_argument("--origination-months", type=int, default=12)
     parser.add_argument("--loan-term-months", type=int, choices=[12, 18, 24, 36], default=18, help="Fixed loan term used for all contracts in this run.")
     parser.add_argument("--annual-interest-rate", type=float, default=0.04, help="Nominal annual interest rate; converted to monthly rate internally.")
@@ -68,6 +70,10 @@ def main():
         raise ValueError("--checkpoint-freq must be >= 0")
     if args.applicants_per_month < 1 or args.origination_months < 1 or args.loan_term_months < 1:
         raise ValueError("Applicant count and month horizons must be >= 1")
+    if args.min_applicants_per_month < 1:
+        raise ValueError("--min-applicants-per-month must be >= 1")
+    if args.max_applicants_per_month < args.min_applicants_per_month:
+        raise ValueError("--max-applicants-per-month must be >= min-applicants-per-month")
     if args.initial_budget <= 0 or args.financial_reward_scale <= 0:
         raise ValueError("Initial budget and financial reward scale must be positive.")
     if not math.isfinite(args.annual_interest_rate) or args.annual_interest_rate < 0:
@@ -109,6 +115,8 @@ def main():
         initial_budget=args.initial_budget,
         monthly_capital_injection=args.monthly_capital_injection,
         applicants_per_month=args.applicants_per_month,
+        min_applicants_per_month=args.min_applicants_per_month,
+        max_applicants_per_month=args.max_applicants_per_month,
         origination_months=args.origination_months,
         loan_term_months=args.loan_term_months,
         annual_interest_rate=args.annual_interest_rate,
@@ -164,7 +172,7 @@ def main():
     print(f"Training timesteps     : {args.timesteps:,}")
     print(f"Seed                   : {args.seed}")
     print(f"Initial budget         : {args.initial_budget:,.0f}")
-    print(f"Applicants/month       : {args.applicants_per_month}")
+    print(f"Applicants/month range : {args.min_applicants_per_month}..{args.max_applicants_per_month} (uniform, inclusive)")
     print(f"Origination months     : {args.origination_months}")
     print(f"Loan term              : {args.loan_term_months}")
     print(f"Annual nominal rate    : {args.annual_interest_rate:.2%}")
