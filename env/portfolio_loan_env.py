@@ -56,6 +56,8 @@ class PortfolioLoanEnv(gym.Env):
         loan_term_months=18,
         annual_interest_rate=0.04,
         recovery_rate=0.0,
+        payment_delay_probability=0.10,
+        delay_lag_weights=(0.25, 0.25, 0.25, 0.25),
         social_reward_weight=1.0,
         financial_reward_weight=1.0,
         financial_reward_scale=100_000_000,
@@ -98,6 +100,19 @@ class PortfolioLoanEnv(gym.Env):
 
         if not np.isfinite(annual_interest_rate) or annual_interest_rate < 0:
             raise ValueError("annual_interest_rate must be finite and non-negative.")
+        if not np.isfinite(payment_delay_probability) or not 0.0 <= payment_delay_probability <= 1.0:
+            raise ValueError("payment_delay_probability must be between 0 and 1.")
+        if recovery_rate != 0.0:
+            raise ValueError(
+                "recovery_rate is not used in the full-repayment delay model; "
+                "set it to 0 and configure payment_delay_probability instead."
+            )
+        if len(delay_lag_weights) != 4:
+            raise ValueError("delay_lag_weights must have four weights for lags 1, 2, 3, and 12 months.")
+        if any(not np.isfinite(weight) or float(weight) < 0.0 for weight in delay_lag_weights):
+            raise ValueError("delay_lag_weights must be finite and non-negative.")
+        if payment_delay_probability > 0.0 and sum(delay_lag_weights) <= 0.0:
+            raise ValueError("At least one delay lag weight must be positive when delays are enabled.")
 
         if financial_reward_scale <= 0:
             raise ValueError("financial_reward_scale must be positive.")
@@ -132,8 +147,14 @@ class PortfolioLoanEnv(gym.Env):
         )
         # Preserve the legacy observation shape for fixed-cohort models.
         # Variable-cohort models get one extra feature for current cohort size.
-        if self.random_monthly_cohorts:
-            self.PORTFOLIO_FEATURE_COUNT = type(self).PORTFOLIO_FEATURE_COUNT + 1
+        self.payment_delay_probability = float(payment_delay_probability)
+        self.delay_lag_weights = tuple(float(weight) for weight in delay_lag_weights)
+        self.delay_model_enabled = self.payment_delay_probability > 0.0
+        self.PORTFOLIO_FEATURE_COUNT = (
+            type(self).PORTFOLIO_FEATURE_COUNT
+            + int(self.random_monthly_cohorts)
+            + int(self.delay_model_enabled)
+        )
         self.origination_months = int(origination_months)
         self.loan_term_months = int(loan_term_months)
 
@@ -272,13 +293,9 @@ class PortfolioLoanEnv(gym.Env):
     # ==========================================================
 
     def _expected_monthly_payment(self):
-        return sum(
-            contract.monthly_payment
-            * contract.survival_probability
-            for contract in self.portfolio.contracts
-            if contract.status == "active"
-            and contract.remaining_months > 0
-        )
+        # Forecast actual next-month cash collections, including receipts
+        # already queued from late installments and excluding delayed shares.
+        return self.portfolio.expected_cash_collections_next_month
 
     def _remaining_cohort_summary(self):
         """
@@ -416,7 +433,10 @@ class PortfolioLoanEnv(gym.Env):
                     (
                         self.portfolio.month
                         - self.origination_months
-                    ) / self.loan_term_months,
+                    ) / max(
+                        self.loan_term_months + self.portfolio.max_delay_months,
+                        1,
+                    ),
                     0.0,
                 ),
                 1.0,
@@ -446,6 +466,11 @@ class PortfolioLoanEnv(gym.Env):
             disbursed_ratio,
             settlement_progress,
         ])
+
+        if self.delay_model_enabled:
+            portfolio_values.append(
+                self.portfolio.pending_delayed_receivables / budget_scale
+            )
 
         portfolio_features = np.array(
             portfolio_values,
@@ -494,6 +519,8 @@ class PortfolioLoanEnv(gym.Env):
             loan_term_months=self.loan_term_months,
             monthly_interest_rate=self.monthly_interest_rate,
             recovery_rate=self.recovery_rate,
+            payment_delay_probability=self.payment_delay_probability,
+            delay_lag_weights=self.delay_lag_weights,
         )
 
         self.phase = "allocation"
@@ -534,9 +561,7 @@ class PortfolioLoanEnv(gym.Env):
 
             reward = self._financial_reward(monthly_result)
 
-            terminated = (
-                self.portfolio.active_contract_count == 0
-            )
+            terminated = self.portfolio.is_fully_settled
 
             truncated = False
 
@@ -562,6 +587,13 @@ class PortfolioLoanEnv(gym.Env):
                 "active_contracts": (
                     self.portfolio.active_contract_count
                 ),
+                "pending_delayed_receivables": (
+                    self.portfolio.pending_delayed_receivables
+                ),
+                "delayed_payment_amount_collected": (
+                    monthly_result.delayed_payment_amount_collected
+                ),
+                "is_fully_settled": self.portfolio.is_fully_settled,
             }
 
             return (
@@ -655,9 +687,7 @@ class PortfolioLoanEnv(gym.Env):
                 # All planned origination months are complete.
                 self.phase = "settlement"
 
-                terminated = (
-                    self.portfolio.active_contract_count == 0
-                )
+                terminated = self.portfolio.is_fully_settled
 
                 truncated = False
 
@@ -700,6 +730,15 @@ class PortfolioLoanEnv(gym.Env):
                 ),
                 "net_default_loss": (
                     monthly_result.net_default_loss
+                ),
+                "delayed_payment_amount_scheduled": (
+                    monthly_result.delayed_payment_amount_scheduled
+                ),
+                "delayed_payment_amount_collected": (
+                    monthly_result.delayed_payment_amount_collected
+                ),
+                "pending_delayed_receivables": (
+                    monthly_result.pending_delayed_receivables
                 ),
             })
 
