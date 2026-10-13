@@ -10,6 +10,7 @@ Use the short runs above as pipeline smoke tests first. For a full run, increase
 
 import argparse
 import json
+import math
 from pathlib import Path
 
 from stable_baselines3 import DQN
@@ -69,8 +70,8 @@ def main():
         raise ValueError("Applicant count and month horizons must be >= 1")
     if args.initial_budget <= 0 or args.financial_reward_scale <= 0:
         raise ValueError("Initial budget and financial reward scale must be positive.")
-    if args.annual_interest_rate < 0:
-        raise ValueError("--annual-interest-rate cannot be negative")
+    if not math.isfinite(args.annual_interest_rate) or args.annual_interest_rate < 0:
+        raise ValueError("--annual-interest-rate must be finite and non-negative")
     if not 0.0 <= args.recovery_rate <= 1.0:
         raise ValueError("--recovery-rate must be between 0 and 1")
 
