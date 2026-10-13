@@ -50,9 +50,9 @@ class PortfolioLoanEnv(gym.Env):
         initial_budget=1_000_000_000,
         monthly_capital_injection=0,
         applicants_per_month=50,
-        origination_months=18,
+        origination_months=12,
         loan_term_months=18,
-        monthly_interest_rate=0.0,
+        annual_interest_rate=0.04,
         recovery_rate=0.0,
         social_reward_weight=1.0,
         financial_reward_weight=1.0,
@@ -76,6 +76,9 @@ class PortfolioLoanEnv(gym.Env):
 
         if loan_term_months <= 0:
             raise ValueError("loan_term_months must be positive.")
+
+        if not np.isfinite(annual_interest_rate) or annual_interest_rate < 0:
+            raise ValueError("annual_interest_rate must be finite and non-negative.")
 
         if financial_reward_scale <= 0:
             raise ValueError("financial_reward_scale must be positive.")
@@ -104,9 +107,10 @@ class PortfolioLoanEnv(gym.Env):
         self.origination_months = int(origination_months)
         self.loan_term_months = int(loan_term_months)
 
-        self.monthly_interest_rate = float(
-            monthly_interest_rate
-        )
+        # The public configuration uses a nominal annual rate; the
+        # amortization engine operates on a monthly rate.
+        self.annual_interest_rate = float(annual_interest_rate)
+        self.monthly_interest_rate = self.annual_interest_rate / 12.0
         self.recovery_rate = float(recovery_rate)
 
         self.social_reward_weight = float(
