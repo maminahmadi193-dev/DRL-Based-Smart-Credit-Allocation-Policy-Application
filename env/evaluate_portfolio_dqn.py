@@ -45,7 +45,9 @@ def evaluate_episode(run_name, model, config, raw_df, scaler, episode, seed):
         scaler=scaler,
         initial_budget=float(config["initial_budget"]),
         monthly_capital_injection=float(config["monthly_capital_injection"]),
-        applicants_per_month=int(config["applicants_per_month"]),
+        applicants_per_month=int(config.get("applicants_per_month", 50)),
+        min_applicants_per_month=config.get("min_applicants_per_month"),
+        max_applicants_per_month=config.get("max_applicants_per_month"),
         origination_months=int(config["origination_months"]),
         loan_term_months=int(config["loan_term_months"]),
         annual_interest_rate=float(config.get("annual_interest_rate", float(config.get("monthly_interest_rate", 0.0)) * 12.0)),
@@ -73,7 +75,7 @@ def evaluate_episode(run_name, model, config, raw_df, scaler, episode, seed):
     invalid_actions = 0
 
     max_steps = (
-        env.applicants_per_month * env.origination_months
+        env.max_applicants_per_month * env.origination_months
         + env.loan_term_months + 10
     )
 
@@ -116,7 +118,7 @@ def evaluate_episode(run_name, model, config, raw_df, scaler, episode, seed):
         )
 
     portfolio = env.portfolio
-    applicants_seen = env.applicants_per_month * env.origination_months
+    applicants_seen = env.total_applicants_seen
     financial_pnl = float(portfolio.cumulative_interest_collected - portfolio.cumulative_net_default_loss)
     social_weight = float(config["social_reward_weight"])
     financial_weight = float(config["financial_reward_weight"])
@@ -151,6 +153,7 @@ def evaluate_episode(run_name, model, config, raw_df, scaler, episode, seed):
         "expected_default_count": float(portfolio.cumulative_expected_defaults),
         "principal_collected": float(portfolio.cumulative_principal_collected)
             if hasattr(portfolio, "cumulative_principal_collected") else np.nan,
+        "applicants_seen": int(applicants_seen),
         "loans_granted": int(len(portfolio.contracts)),
         "loan_approval_rate": len(portfolio.contracts) / applicants_seen if applicants_seen else 0.0,
         "total_disbursed": float(portfolio.total_disbursed),
@@ -263,6 +266,7 @@ def main():
         "interest_collected",
         "net_default_loss",
         "expected_default_count",
+        "applicants_seen",
         "loans_granted",
         "loan_approval_rate",
         "total_disbursed",
@@ -306,6 +310,7 @@ def main():
         "mean_total_reward_under_amount_sensitive_formula",
         "mean_financial_pnl",
         "mean_net_default_loss",
+        "mean_applicants_seen",
         "mean_loans_granted",
         "mean_average_loan_size",
         "mean_final_cash",
