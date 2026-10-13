@@ -384,7 +384,7 @@ def parse_args():
         "--payment-delay-probability",
         type=float,
         default=0.10,
-        help="Illustrative expected share of each installment collected late (not empirically calibrated).",
+        help="Illustrative maximum expected late share; scaled by post-loan customer risk score / 100 (not empirically calibrated).",
     )
     parser.add_argument(
         "--delay-lag-weights",
@@ -459,7 +459,7 @@ def main():
     print(f"Loan term (months)       : {args.loan_term_months}")
     print(f"Annual nominal rate       : {args.annual_interest_rate:.2%}")
     print(f"Monthly rate (derived)    : {args.annual_interest_rate / 12.0:.6%}")
-    print(f"Late installment share    : {args.payment_delay_probability:.1%} (illustrative)")
+    print(f"Max late-payment share     : {args.payment_delay_probability:.1%} (risk-scaled; illustrative)")
     print(f"Delay lag weights         : {args.delay_lag_weights}")
     print("Permanent credit loss      : disabled (all delayed installments are eventually collected)")
     print(f"Social reward weight     : {args.social_reward_weight}")
