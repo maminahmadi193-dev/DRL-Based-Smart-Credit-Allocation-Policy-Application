@@ -65,10 +65,6 @@ def evaluate_episode(run_name, model, config, raw_df, scaler, episode, seed):
     experimental_engine = RewardEngine(scale_access_rewards_by_coverage=True)
 
     obs, _ = env.reset(seed=seed)
-    env.portfolio.customer_simulator.max_hazard = float(
-        config.get("max_monthly_hazard", 0.005)
-    )
-
     total_reward_as_trained = 0.0
     total_legacy_social = 0.0
     total_experimental_social = 0.0
