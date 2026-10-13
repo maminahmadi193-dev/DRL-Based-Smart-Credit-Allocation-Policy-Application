@@ -523,14 +523,14 @@ class TestPortfolioLoanEnv(unittest.TestCase):
         self.assertTrue(env.observation_space.contains(observation))
         initial_cash = env.portfolio.available_budget
 
-        # Grant a loan. At the end of allocation month 1, its first scheduled
-        # installment becomes due in month 2 but is queued for month 3.
+        # Grant a loan. At the end of allocation month 1, the installment's
+        # risk-scaled late share is queued for month 3.
         _, reward_1, terminated, _, info_1 = env.step(1)
 
         self.assertFalse(terminated)
         self.assertTrue(np.isfinite(reward_1))
         self.assertEqual(env.phase, "settlement")
-        self.assertAlmostEqual(info_1["interest_collected"], 0.0)
+        self.assertGreater(info_1["interest_collected"], 0.0)
         self.assertGreater(info_1["delayed_payment_amount_scheduled"], 0.0)
         self.assertGreater(info_1["pending_delayed_receivables"], 0.0)
         self.assertAlmostEqual(info_1["net_default_loss"], 0.0)
