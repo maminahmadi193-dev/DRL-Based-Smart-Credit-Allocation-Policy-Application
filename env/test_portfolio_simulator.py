@@ -110,7 +110,7 @@ class TestPortfolioSimulator(unittest.TestCase):
             budget=1_000_000,
             term=3,
             rate=0,
-            hazard=0,
+            delay_probability=0.0,
         )
         portfolio.advance_month()
 
