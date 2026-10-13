@@ -108,6 +108,7 @@ def make_env(**overrides):
         "loan_term_months": 2,
         "annual_interest_rate": 0.0,
         "recovery_rate": 0.0,
+        "payment_delay_probability": 0.0,
     }
 
     config.update(overrides)
@@ -501,7 +502,7 @@ class TestPortfolioLoanEnv(unittest.TestCase):
             places=4,
         )
 
-    def test_integrated_interest_and_default_accounting(self):
+    def test_integrated_interest_and_delayed_payment_accounting(self):
         env = make_env(
             initial_budget=100_000_000,
             monthly_capital_injection=0,
@@ -509,78 +510,49 @@ class TestPortfolioLoanEnv(unittest.TestCase):
             origination_months=1,
             loan_term_months=2,
             annual_interest_rate=0.12,
-            recovery_rate=0.5,
+            payment_delay_probability=1.0,
+            delay_lag_weights=(1.0, 0.0, 0.0, 0.0),
         )
 
         env.reset(seed=42)
-
-        # Use a deliberately elevated hazard for this test only.
-        # This is a stress-test parameter, not a proposed real-world rate.
-        env.portfolio.customer_simulator.max_hazard = 0.02
-
         initial_cash = env.portfolio.available_budget
 
-        # Grant a loan; the environment processes the first
-        # repayment/default period when the allocation month ends.
+        # Grant a loan. At the end of allocation month 1, its first scheduled
+        # installment becomes due in month 2 but is queued for month 3.
         _, reward_1, terminated, _, info_1 = env.step(1)
 
         self.assertFalse(terminated)
         self.assertTrue(np.isfinite(reward_1))
         self.assertEqual(env.phase, "settlement")
+        self.assertAlmostEqual(info_1["interest_collected"], 0.0)
+        self.assertGreater(info_1["delayed_payment_amount_scheduled"], 0.0)
+        self.assertGreater(info_1["pending_delayed_receivables"], 0.0)
+        self.assertAlmostEqual(info_1["net_default_loss"], 0.0)
 
-        self.assertGreater(
-            info_1["interest_collected"],
-            0.0,
-        )
-
-        self.assertGreater(
-            info_1["net_default_loss"],
-            0.0,
-        )
-
-        # Settle the remaining contract.
+        # Month 3 receives the first late installment and queues the final one.
         _, reward_2, terminated, _, info_2 = env.step(0)
-
-        self.assertTrue(terminated)
+        self.assertFalse(terminated)
         self.assertTrue(info_2["action_ignored"])
         self.assertTrue(np.isfinite(reward_2))
+        self.assertGreater(info_2["delayed_payment_amount_collected"], 0.0)
+        self.assertGreater(info_2["pending_delayed_receivables"], 0.0)
 
-        portfolio = env.portfolio
-
-        self.assertGreater(
-            portfolio.cumulative_expected_defaults,
-            0.0,
-        )
-
-        self.assertGreater(
-            portfolio.cumulative_interest_collected,
-            0.0,
-        )
-
-        self.assertGreater(
-            portfolio.cumulative_net_default_loss,
-            0.0,
-        )
-
-        # With no capital injections, final cash should equal
-        # initial cash + interest collected - net credit losses.
-        expected_final_cash = (
-            initial_cash
-            + portfolio.cumulative_interest_collected
-            - portfolio.cumulative_net_default_loss
-        )
-
+        # Month 4 receives the final installment; only now is the portfolio settled.
+        _, reward_3, terminated, _, info_3 = env.step(0)
+        self.assertTrue(terminated)
+        self.assertTrue(info_3["action_ignored"])
+        self.assertTrue(np.isfinite(reward_3))
+        self.assertAlmostEqual(env.portfolio.cumulative_net_default_loss, 0.0)
         self.assertAlmostEqual(
-            portfolio.available_budget,
-            expected_final_cash,
+            env.portfolio.cumulative_delayed_payment_amount_scheduled,
+            env.portfolio.cumulative_delayed_payment_amount_collected,
+        )
+        self.assertAlmostEqual(
+            env.portfolio.available_budget,
+            initial_cash + env.portfolio.cumulative_interest_collected,
             delta=0.01,
         )
-
-        self.assertEqual(
-            portfolio.contracts[0].status,
-            "matured",
-        )
-
+        env.close()
 
     def test_gymnasium_environment_checker(self):
         env = make_env(
