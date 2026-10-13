@@ -552,6 +552,7 @@ class PortfolioLoanEnv(gym.Env):
 
         requested_amount = self.ACTION_AMOUNTS[action]
         cohort_size = len(self.current_cohort_indices)
+        acted_customer_index = self.current_row_index
 
         row = self.raw_df.iloc[self.current_row_index]
 
@@ -639,7 +640,7 @@ class PortfolioLoanEnv(gym.Env):
         info = {
             "phase": self.phase,
             "month": self.portfolio.month,
-            "customer_index": self.current_row_index,
+            "customer_index": acted_customer_index,
             "applicants_in_cohort": cohort_size,
             "total_applicants_seen": self.total_applicants_seen,
             "action_index": action,
