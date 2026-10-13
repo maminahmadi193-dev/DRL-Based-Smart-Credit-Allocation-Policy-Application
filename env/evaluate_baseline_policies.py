@@ -522,6 +522,7 @@ def main():
         "mean_net_default_loss",
         "mean_delayed_payment_amount_scheduled",
         "mean_delayed_payment_amount_collected",
+        "mean_pending_delayed_receivables",
         "mean_applicants_seen",
         "mean_loans_granted",
         "mean_total_disbursed",
