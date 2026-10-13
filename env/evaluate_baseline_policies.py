@@ -466,7 +466,7 @@ def main():
     print(f"Monthly rate (derived)    : {args.annual_interest_rate / 12.0:.6%}")
     print(f"Late installment share    : {args.payment_delay_probability:.1%} (illustrative)")
     print(f"Delay lag weights         : {args.delay_lag_weights}")
-    print(f"Recovery rate             : {args.recovery_rate:.2%}")
+    print("Permanent credit loss      : disabled (all delayed installments are eventually collected)")
     print(f"Max monthly hazard       : {args.max_hazard:.6f}")
     print(f"Social reward weight     : {args.social_reward_weight}")
     print(
