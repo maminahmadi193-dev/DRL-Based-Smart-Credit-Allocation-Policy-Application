@@ -418,6 +418,18 @@ class TestPortfolioLoanEnv(unittest.TestCase):
         self.assertTrue(all(2 <= size <= 5 for size in first_run))
         self.assertGreater(len(set(first_run)), 1)
 
+    def test_gymnasium_checker_accepts_random_cohort_environment(self):
+        env = make_env(
+            applicants_per_month=4,
+            min_applicants_per_month=2,
+            max_applicants_per_month=5,
+            origination_months=2,
+            loan_term_months=2,
+        )
+
+        check_env(env, skip_render_check=True)
+        env.close()
+
     def test_invalid_monthly_cohort_range_is_rejected(self):
         with self.assertRaises(ValueError):
             make_env(
