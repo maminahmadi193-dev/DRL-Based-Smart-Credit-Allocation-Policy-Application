@@ -233,12 +233,18 @@ class PortfolioLoanEnv(gym.Env):
         Sampling with replacement allows the dataset to serve
         as an empirical population for repeated simulation.
         """
-        cohort_size = int(
-            self.np_random.integers(
-                self.min_applicants_per_month,
-                self.max_applicants_per_month + 1,
+        if self.random_monthly_cohorts:
+            cohort_size = int(
+                self.np_random.integers(
+                    self.min_applicants_per_month,
+                    self.max_applicants_per_month + 1,
+                )
             )
-        )
+        else:
+            # Do not consume an extra RNG draw in fixed-cohort mode;
+            # legacy seeded applicant samples therefore remain unchanged.
+            cohort_size = self.min_applicants_per_month
+
         self.current_cohort_indices = self.np_random.choice(
             len(self.raw_df),
             size=cohort_size,
