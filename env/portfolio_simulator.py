@@ -36,7 +36,7 @@ class LoanContract:
 
 @dataclass
 class MonthlyPortfolioResult:
-    """Expected portfolio cash flows and credit losses for one month."""
+    """Expected collections, delayed receivables, and cash flows for one month."""
 
     month: int
     cash_before: float
