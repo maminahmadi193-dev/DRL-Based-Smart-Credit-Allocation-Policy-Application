@@ -514,7 +514,13 @@ class TestPortfolioLoanEnv(unittest.TestCase):
             delay_lag_weights=(1.0, 0.0, 0.0, 0.0),
         )
 
-        env.reset(seed=42)
+        observation, _ = env.reset(seed=42)
+        self.assertEqual(
+            observation.shape,
+            (CustomerState.FEATURE_COUNT + env.PORTFOLIO_FEATURE_COUNT,),
+        )
+        self.assertEqual(env.PORTFOLIO_FEATURE_COUNT, 16)
+        self.assertTrue(env.observation_space.contains(observation))
         initial_cash = env.portfolio.available_budget
 
         # Grant a loan. At the end of allocation month 1, its first scheduled
