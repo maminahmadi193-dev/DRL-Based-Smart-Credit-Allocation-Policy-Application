@@ -241,7 +241,7 @@ def evaluate_one_episode(policy: str, episode: int, seed: int, df: pd.DataFrame,
         applicants_per_month=args.applicants_per_month,
         origination_months=args.origination_months,
         loan_term_months=args.loan_term_months,
-        monthly_interest_rate=args.monthly_interest_rate,
+        annual_interest_rate=args.annual_interest_rate,
         recovery_rate=args.recovery_rate,
         social_reward_weight=args.social_reward_weight,
         financial_reward_weight=args.financial_reward_weight,
@@ -347,9 +347,9 @@ def parse_args():
     parser.add_argument("--initial-budget", type=float, default=1_000_000_000)
     parser.add_argument("--monthly-capital-injection", type=float, default=0.0)
     parser.add_argument("--applicants-per-month", type=int, default=50)
-    parser.add_argument("--origination-months", type=int, default=18)
-    parser.add_argument("--loan-term-months", type=int, default=18)
-    parser.add_argument("--monthly-interest-rate", type=float, default=0.0)
+    parser.add_argument("--origination-months", type=int, default=12)
+    parser.add_argument("--loan-term-months", type=int, choices=[12, 18, 24, 36], default=18)
+    parser.add_argument("--annual-interest-rate", type=float, default=0.04, help="Nominal annual interest rate; converted to monthly rate internally.")
     parser.add_argument("--recovery-rate", type=float, default=0.0)
     parser.add_argument("--max-hazard", type=float, default=0.005)
     parser.add_argument("--social-reward-weight", type=float, default=1.0)
@@ -376,8 +376,8 @@ def main():
         raise ValueError("Applicant count and both month horizons must be >= 1")
     if not 0.0 <= args.recovery_rate <= 1.0:
         raise ValueError("--recovery-rate must be between 0 and 1")
-    if args.monthly_interest_rate < 0:
-        raise ValueError("--monthly-interest-rate cannot be negative")
+    if not np.isfinite(args.annual_interest_rate) or args.annual_interest_rate < 0:
+        raise ValueError("--annual-interest-rate must be finite and non-negative")
     if not 0.0 <= args.max_hazard:
         raise ValueError("--max-hazard cannot be negative")
 
@@ -399,7 +399,8 @@ def main():
     print(f"Applicants/month         : {args.applicants_per_month}")
     print(f"Origination months       : {args.origination_months}")
     print(f"Loan term (months)       : {args.loan_term_months}")
-    print(f"Monthly interest rate    : {args.monthly_interest_rate:.6f}")
+    print(f"Annual nominal rate       : {args.annual_interest_rate:.2%}")
+    print(f"Monthly rate (derived)    : {args.annual_interest_rate / 12.0:.6%}")
     print(f"Recovery rate             : {args.recovery_rate:.2%}")
     print(f"Max monthly hazard       : {args.max_hazard:.6f}")
     print(f"Social reward weight     : {args.social_reward_weight}")
@@ -408,7 +409,7 @@ def main():
         + ("amount-sensitive access rewards" if args.scale_access_rewards_by_coverage else "legacy access rewards")
     )
     print(f"Financial reward weight  : {args.financial_reward_weight}")
-    if args.monthly_interest_rate == 0.0 and args.recovery_rate == 0.0:
+    if args.annual_interest_rate == 0.0 and args.recovery_rate == 0.0:
         print("NOTE: Interest and recovery are both zero, matching the current "
               "environment defaults. Treat the result as a baseline smoke test "
               "unless those assumptions are intentional.")
