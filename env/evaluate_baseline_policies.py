@@ -507,7 +507,7 @@ def main():
             "total_reward": "Sum of the environment rewards, including scaled financial reward.",
             "social_reward": "Sum of the environment's reported social reward component.",
             "financial_pnl": "Interest collected minus net default loss, in currency units.",
-            "net_default_loss": "Expected defaulted principal minus recoveries, in currency units.",
+            "net_default_loss": "Zero under the full-collection assumption; delayed receipts are tracked separately.",
             "final_cash": "Available cash after all outstanding loans have been serviced.",
         },
     })
