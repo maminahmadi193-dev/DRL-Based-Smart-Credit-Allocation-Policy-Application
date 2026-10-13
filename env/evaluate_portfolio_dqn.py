@@ -51,7 +51,9 @@ def evaluate_episode(run_name, model, config, raw_df, scaler, episode, seed):
         origination_months=int(config["origination_months"]),
         loan_term_months=int(config["loan_term_months"]),
         annual_interest_rate=float(config.get("annual_interest_rate", float(config.get("monthly_interest_rate", 0.0)) * 12.0)),
-        recovery_rate=float(config["recovery_rate"]),
+        recovery_rate=float(config.get("recovery_rate", 0.0)),
+        payment_delay_probability=float(config.get("payment_delay_probability", 0.0)),
+        delay_lag_weights=config.get("delay_lag_weights", (0.4, 0.3, 0.2, 0.1)),
         social_reward_weight=float(config["social_reward_weight"]),
         financial_reward_weight=float(config["financial_reward_weight"]),
         financial_reward_scale=float(config["financial_reward_scale"]),
@@ -76,7 +78,7 @@ def evaluate_episode(run_name, model, config, raw_df, scaler, episode, seed):
 
     max_steps = (
         env.max_applicants_per_month * env.origination_months
-        + env.loan_term_months + 10
+        + env.loan_term_months + env.portfolio.max_delay_months + 10
     )
 
     terminated = False
@@ -151,6 +153,10 @@ def evaluate_episode(run_name, model, config, raw_df, scaler, episode, seed):
         "interest_collected": float(portfolio.cumulative_interest_collected),
         "net_default_loss": float(portfolio.cumulative_net_default_loss),
         "expected_default_count": float(portfolio.cumulative_expected_defaults),
+        "delayed_payment_amount_scheduled": float(portfolio.cumulative_delayed_payment_amount_scheduled),
+        "delayed_payment_amount_collected": float(portfolio.cumulative_delayed_payment_amount_collected),
+        "pending_delayed_receivables": float(portfolio.pending_delayed_receivables),
+        "expected_delayed_installments": float(portfolio.cumulative_expected_delayed_installments),
         "principal_collected": float(portfolio.cumulative_principal_collected)
             if hasattr(portfolio, "cumulative_principal_collected") else np.nan,
         "applicants_seen": int(applicants_seen),
@@ -266,6 +272,10 @@ def main():
         "interest_collected",
         "net_default_loss",
         "expected_default_count",
+        "delayed_payment_amount_scheduled",
+        "delayed_payment_amount_collected",
+        "pending_delayed_receivables",
+        "expected_delayed_installments",
         "applicants_seen",
         "loans_granted",
         "loan_approval_rate",
@@ -310,6 +320,8 @@ def main():
         "mean_total_reward_under_amount_sensitive_formula",
         "mean_financial_pnl",
         "mean_net_default_loss",
+        "mean_delayed_payment_amount_scheduled",
+        "mean_delayed_payment_amount_collected",
         "mean_applicants_seen",
         "mean_loans_granted",
         "mean_average_loan_size",
