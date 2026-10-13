@@ -350,9 +350,9 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=42, help="Base seed; all policies use matching episode seeds.")
     parser.add_argument("--initial-budget", type=float, default=1_000_000_000)
     parser.add_argument("--monthly-capital-injection", type=float, default=0.0)
-    parser.add_argument("--applicants-per-month", type=int, default=50, help="Fixed monthly cohort size used when min/max are omitted.")
-    parser.add_argument("--min-applicants-per-month", type=int, default=30)
-    parser.add_argument("--max-applicants-per-month", type=int, default=70)
+    parser.add_argument("--applicants-per-month", type=int, default=None, help="Legacy fixed cohort size. When supplied alone, monthly cohort size is fixed.")
+    parser.add_argument("--min-applicants-per-month", type=int, default=None, help="Minimum monthly cohort size (inclusive); default range is 30..70.")
+    parser.add_argument("--max-applicants-per-month", type=int, default=None, help="Maximum monthly cohort size (inclusive).")
     parser.add_argument("--origination-months", type=int, default=12)
     parser.add_argument("--loan-term-months", type=int, choices=[12, 18, 24, 36], default=18)
     parser.add_argument("--annual-interest-rate", type=float, default=0.04, help="Nominal annual interest rate; converted to monthly rate internally.")
@@ -376,6 +376,21 @@ def parse_args():
 
 def main():
     args = parse_args()
+
+    # Default to an illustrative random range; a legacy explicit fixed
+    # count keeps old baseline commands reproducible.
+    if args.min_applicants_per_month is None and args.max_applicants_per_month is None:
+        if args.applicants_per_month is None:
+            args.min_applicants_per_month, args.max_applicants_per_month = 30, 70
+        else:
+            args.min_applicants_per_month = args.applicants_per_month
+            args.max_applicants_per_month = args.applicants_per_month
+    elif args.min_applicants_per_month is None or args.max_applicants_per_month is None:
+        raise ValueError("Set both --min-applicants-per-month and --max-applicants-per-month.")
+
+    if args.applicants_per_month is None:
+        args.applicants_per_month = (args.min_applicants_per_month + args.max_applicants_per_month) // 2
+
     if args.episodes < 1:
         raise ValueError("--episodes must be >= 1")
     if args.applicants_per_month < 1 or args.origination_months < 1 or args.loan_term_months < 1:
