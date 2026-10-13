@@ -365,6 +365,43 @@ class TestPortfolioLoanEnv(unittest.TestCase):
         )
         
     
+    def test_random_monthly_cohort_sizes_are_seeded_and_within_bounds(self):
+        def collect_sizes(seed):
+            env = make_env(
+                applicants_per_month=4,
+                min_applicants_per_month=2,
+                max_applicants_per_month=5,
+                origination_months=6,
+                loan_term_months=2,
+            )
+            env.reset(seed=seed)
+            sizes = []
+
+            while env.phase == "allocation":
+                cohort_size = len(env.current_cohort_indices)
+                sizes.append(cohort_size)
+                for _ in range(cohort_size):
+                    _, _, _, _, _ = env.step(0)
+
+            env.close()
+            return sizes
+
+        first_run = collect_sizes(seed=123)
+        repeated_run = collect_sizes(seed=123)
+
+        self.assertEqual(first_run, repeated_run)
+        self.assertEqual(len(first_run), 6)
+        self.assertTrue(all(2 <= size <= 5 for size in first_run))
+        self.assertGreater(len(set(first_run)), 1)
+
+    def test_invalid_monthly_cohort_range_is_rejected(self):
+        with self.assertRaises(ValueError):
+            make_env(
+                applicants_per_month=4,
+                min_applicants_per_month=6,
+                max_applicants_per_month=5,
+            )
+
     def test_annual_nominal_rate_is_converted_to_monthly_rate(self):
         env = make_env(
             initial_budget=100_000_000,
