@@ -237,8 +237,6 @@ class PortfolioLoanEnv(gym.Env):
             size=cohort_size,
             replace=True,
         )
-        self.total_applicants_seen += cohort_size
-
         self.current_applicant_position = 0
 
         self._load_current_applicant()
@@ -589,6 +587,9 @@ class PortfolioLoanEnv(gym.Env):
                 )
         else:
             reward = 0.0
+
+        # Count the applicant only after this decision has been processed.
+        self.total_applicants_seen += 1
 
         # Move to the next applicant in the same month.
         self.current_applicant_position += 1
