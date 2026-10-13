@@ -127,6 +127,13 @@ class PortfolioLoanEnv(gym.Env):
         self.applicants_per_month = int(applicants_per_month)
         self.min_applicants_per_month = int(min_applicants_per_month)
         self.max_applicants_per_month = int(max_applicants_per_month)
+        self.random_monthly_cohorts = (
+            self.min_applicants_per_month < self.max_applicants_per_month
+        )
+        # Preserve the legacy observation shape for fixed-cohort models.
+        # Variable-cohort models get one extra feature for current cohort size.
+        if self.random_monthly_cohorts:
+            self.PORTFOLIO_FEATURE_COUNT = type(self).PORTFOLIO_FEATURE_COUNT + 1
         self.origination_months = int(origination_months)
         self.loan_term_months = int(loan_term_months)
 
@@ -409,20 +416,33 @@ class PortfolioLoanEnv(gym.Env):
                 1.0,
             )
 
+        portfolio_values = [
+            cash_ratio,
+            month_fraction,
+            position_fraction,
+        ]
+
+        if self.random_monthly_cohorts:
+            cohort_size_ratio = (
+                len(self.current_cohort_indices) / self.max_applicants_per_month
+                if self.phase == "allocation"
+                else 0.0
+            )
+            portfolio_values.append(cohort_size_ratio)
+
+        portfolio_values.extend([
+            settlement_flag,
+            active_contract_ratio,
+            outstanding_ratio,
+            payment_ratio,
+            loss_ratio,
+            interest_ratio,
+            disbursed_ratio,
+            settlement_progress,
+        ])
+
         portfolio_features = np.array(
-            [
-                cash_ratio,
-                month_fraction,
-                position_fraction,
-                settlement_flag,
-                active_contract_ratio,
-                outstanding_ratio,
-                payment_ratio,
-                loss_ratio,
-                interest_ratio,
-                disbursed_ratio,
-                settlement_progress,
-            ],
+            portfolio_values,
             dtype=np.float32,
         )
 
