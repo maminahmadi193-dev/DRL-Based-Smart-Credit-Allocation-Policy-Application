@@ -383,6 +383,7 @@ class TestPortfolioLoanEnv(unittest.TestCase):
                 for _ in range(cohort_size):
                     _, _, _, _, _ = env.step(0)
 
+            self.assertEqual(env.total_applicants_seen, sum(sizes))
             env.close()
             return sizes
 
