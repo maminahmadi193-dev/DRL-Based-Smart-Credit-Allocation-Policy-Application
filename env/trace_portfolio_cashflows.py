@@ -10,7 +10,11 @@ from pathlib import Path
 
 import pandas as pd
 
-from portfolio_experiment_utils import load_split_and_scaler, project_root
+from portfolio_experiment_utils import (
+    calibrate_hazard_intercept_for_population,
+    load_split_and_scaler,
+    project_root,
+)
 from portfolio_loan_env import PortfolioLoanEnv
 
 
@@ -27,6 +31,8 @@ def parse_args():
     parser.add_argument("--hazard-slope", type=float, default=0.08)
     parser.add_argument("--hazard-center", type=float, default=60.0)
     parser.add_argument("--max-hazard", type=float, default=0.005)
+    parser.add_argument("--target-term-default-rate", type=float, default=0.013)
+    parser.add_argument("--reference-loan-amount", type=float, default=100_000_000)
     parser.add_argument(
         "--stress-max-delay",
         action="store_true",
@@ -66,15 +72,33 @@ def main():
         )
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Use the held-out test rows for the applicant pool. The scaler was fitted
-    # on training rows only by the shared data-preparation utility.
-    _, _, test_raw, scaler, split_info = load_split_and_scaler(
+    # Use the held-out test rows for the single trace. The calibration itself
+    # uses only population risk/exposure features, not applicant default labels.
+    train_raw, validation_raw, test_raw, scaler, split_info = load_split_and_scaler(
         data_path=args.data,
         split_seed=42,
     )
 
     collection_lag = 12 if args.stress_max_delay else args.default_collection_lag_months
     maximum_hazard = 1_000.0 if args.stress_max_delay else args.max_hazard
+    hazard_intercept = 0.0
+    hazard_calibration = None
+    if not args.stress_max_delay:
+        calibration_population = pd.concat(
+            [train_raw, validation_raw, test_raw],
+            ignore_index=True,
+        )
+        hazard_calibration = calibrate_hazard_intercept_for_population(
+            raw_df=calibration_population,
+            target_term_default_rate=args.target_term_default_rate,
+            reference_loan_amount=args.reference_loan_amount,
+            loan_term_months=args.loan_term_months,
+            max_hazard=maximum_hazard,
+            hazard_slope=args.hazard_slope,
+            hazard_center=args.hazard_center,
+        )
+        hazard_intercept = float(hazard_calibration["hazard_intercept"])
+
     env = PortfolioLoanEnv(
         raw_df=test_raw,
         scaler=scaler,
@@ -91,6 +115,7 @@ def main():
         hazard_slope=args.hazard_slope,
         hazard_center=args.hazard_center,
         max_hazard=maximum_hazard,
+        hazard_intercept=hazard_intercept,
         social_reward_weight=1.0,
         financial_reward_weight=1.0,
         financial_reward_scale=100_000_000,
