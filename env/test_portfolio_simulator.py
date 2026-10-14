@@ -159,6 +159,8 @@ class TestPortfolioSimulator(unittest.TestCase):
         result = portfolio.advance_month()
         self.assertAlmostEqual(result.principal_collected, 0.0)
         self.assertAlmostEqual(result.delayed_payment_amount_scheduled, 100_000)
+        self.assertEqual(result.missed_installment_count, 1.0)
+        self.assertEqual(result.recognized_default_count, 0.0)
         self.assertAlmostEqual(result.pending_delayed_receivables, 100_000)
         self.assertAlmostEqual(portfolio.available_budget, 700_000)
         contract = portfolio.contracts[0]
@@ -184,6 +186,7 @@ class TestPortfolioSimulator(unittest.TestCase):
         self.assertEqual(portfolio.month, 6)
         self.assertTrue(contract.default_recognized)
         self.assertEqual(result.expected_default_count, 1.0)
+        self.assertEqual(result.recognized_default_count, 1.0)
         self.assertAlmostEqual(result.principal_collected, 100_000)
         self.assertTrue(contract.late_payment_collected)
         self.assertTrue(portfolio.is_fully_settled)
