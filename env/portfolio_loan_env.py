@@ -57,8 +57,8 @@ class PortfolioLoanEnv(gym.Env):
         loan_term_months=18,
         annual_interest_rate=0.04,
         recovery_rate=0.0,  # Deprecated compatibility argument; must remain zero.
-        payment_delay_probability=0.10,
-        delay_lag_weights=(0.25, 0.25, 0.25, 0.25),
+        default_collection_lag_months=4,
+        default_dpd_threshold_days=90,
         social_reward_weight=1.0,
         financial_reward_weight=1.0,
         financial_reward_scale=100_000_000,
@@ -104,16 +104,20 @@ class PortfolioLoanEnv(gym.Env):
         if recovery_rate != 0.0:
             raise ValueError(
                 "recovery_rate is deprecated and incompatible with the "
-                "full-collection scenario; use payment_delay_probability."
+                "full-collection scenario; it must remain zero."
             )
-        if not np.isfinite(payment_delay_probability) or not 0.0 <= payment_delay_probability <= 1.0:
-            raise ValueError("payment_delay_probability must be between 0 and 1.")
-        if len(delay_lag_weights) != 4:
-            raise ValueError("delay_lag_weights must have four weights for lags 1, 2, 3, and 12 months.")
-        if any(not np.isfinite(weight) or float(weight) < 0.0 for weight in delay_lag_weights):
-            raise ValueError("delay_lag_weights must be finite and non-negative.")
-        if payment_delay_probability > 0.0 and sum(delay_lag_weights) <= 0.0:
-            raise ValueError("At least one delay lag weight must be positive when delays are enabled.")
+        if (
+            not isinstance(default_collection_lag_months, int)
+            or not 4 <= default_collection_lag_months <= 12
+        ):
+            raise ValueError(
+                "default_collection_lag_months must be an integer from 4 to 12."
+            )
+        if (
+            not isinstance(default_dpd_threshold_days, int)
+            or default_dpd_threshold_days < 1
+        ):
+            raise ValueError("default_dpd_threshold_days must be a positive integer.")
 
         if financial_reward_scale <= 0:
             raise ValueError("financial_reward_scale must be positive.")
@@ -148,11 +152,11 @@ class PortfolioLoanEnv(gym.Env):
         )
         # Preserve the legacy observation shape for fixed-cohort models.
         # Variable-cohort models get one extra feature for current cohort size.
-        self.payment_delay_probability = float(payment_delay_probability)
-        self.delay_lag_weights = tuple(float(weight) for weight in delay_lag_weights)
-        self.delay_model_enabled = self.payment_delay_probability > 0.0
-        # The next-month onward delayed-receipt schedule is part of the
-        # observation so that the cash-flow process remains observable.
+        self.default_collection_lag_months = int(default_collection_lag_months)
+        self.default_dpd_threshold_days = int(default_dpd_threshold_days)
+        # Stochastic missed-installment risk is always enabled through the
+        # CustomerSimulator hazard model; queued receipts remain observable.
+        self.delay_model_enabled = True
         self.delay_observation_horizon = 12
         self.PORTFOLIO_FEATURE_COUNT = (
             type(self).PORTFOLIO_FEATURE_COUNT
@@ -522,8 +526,9 @@ class PortfolioLoanEnv(gym.Env):
             ),
             loan_term_months=self.loan_term_months,
             monthly_interest_rate=self.monthly_interest_rate,
-            payment_delay_probability=self.payment_delay_probability,
-            delay_lag_weights=self.delay_lag_weights,
+            default_collection_lag_months=self.default_collection_lag_months,
+            default_dpd_threshold_days=self.default_dpd_threshold_days,
+            rng=self.np_random,
         )
 
         self.phase = "allocation"
