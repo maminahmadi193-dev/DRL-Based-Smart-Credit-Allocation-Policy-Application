@@ -34,3 +34,7 @@ jobs:
         working-directory: env
         run: |
           python -m unittest test_portfolio_simulator test_portfolio_loan_env test_reward_engine -v
+
+      - name: Smoke-test baseline policy pipeline
+        run: |
+          python env/evaluate_baseline_policies.py --episodes 1 --applicants-per-month 1 --origination-months 1 --loan-term-months 12 --initial-budget 1000000000 --max-hazard 1000 --default-collection-lag-months 12 --output-dir "$RUNNER_TEMP/portfolio-baseline-smoke"
