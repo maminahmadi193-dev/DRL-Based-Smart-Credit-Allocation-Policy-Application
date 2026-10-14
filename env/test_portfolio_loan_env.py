@@ -548,7 +548,8 @@ class TestPortfolioLoanEnv(unittest.TestCase):
         self.assertFalse(terminated)
         self.assertTrue(env.observation_space.contains(observation_1))
         self.assertEqual(env.phase, "settlement")
-        self.assertAlmostEqual(info_1["principal_collected"], 50_000_000.0 / 1.0 + info_1["principal_collected"] - 50_000_000.0) if False else None
+        self.assertAlmostEqual(info_1["principal_collected"], 0.0)
+        self.assertAlmostEqual(info_1["interest_collected"], 0.0)
         self.assertGreater(info_1["interest_collected"], 0.0)
         self.assertGreater(info_1["delayed_payment_amount_scheduled"], 0.0)
         self.assertGreater(info_1["pending_delayed_receivables"], 0.0)
