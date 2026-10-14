@@ -84,11 +84,15 @@ class CustomerSimulator:
         approved_unsecured_amount: float,
         ) -> float:
 
-        if (
-            monthly_income <= 0
-            or approved_unsecured_amount <= 0
-        ):
+        if approved_unsecured_amount <= 0:
             return 0.0
+
+        # No positive monthly income means the installment has no observed
+        # income base to support it; treat capacity pressure as maximal.
+        # The caller handles this as a modeling assumption for zero-income
+        # applicants, not as a learned estimate from historical defaults.
+        if monthly_income <= 0:
+            return 1.0
 
         return (
             approved_unsecured_amount
