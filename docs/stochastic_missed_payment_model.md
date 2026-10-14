@@ -22,7 +22,9 @@ and the probability of at least one missed installment during a loan term of `T`
 
 `PD(T) = 1 - exp(-h * T) = 1 - (1 - q)^T`.
 
-The term-specific PD is stored on each loan contract. Actual payments use a seeded random draw with probability `q`; this is not an expected-value split of cash flows.
+The term-specific PD is stored on each loan contract. Actual payments use a seeded random draw with probability `q`; this is not an expected-value split of cash flows. Here, term PD means the probability that an installment due within the contractual term is missed and eventually crosses the DPD threshold. For a missed final installment, default recognition can occur after contractual maturity during the settlement tail.
+
+The environment's next-month expected-collections feature remains an expectation used for decision-making and forecasting. It can represent a probability-weighted expected value, but it is **not booked as a realized receipt**: actual cash collections are recorded only when the full installment is paid or when the full overdue installment is later collected.
 
 ## Missed installment and default recognition
 
