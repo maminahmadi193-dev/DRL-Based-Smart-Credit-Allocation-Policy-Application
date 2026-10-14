@@ -1,6 +1,8 @@
 
 import unittest
 
+import numpy as np
+
 from customer_state import CustomerState
 from customer_simulator import CustomerSimulator
 from portfolio_simulator import PortfolioSimulator
@@ -33,17 +35,18 @@ def make_portfolio(
     budget=1_000_000,
     term=3,
     rate=0.0,
-    delay_probability=0.0,
-    delay_weights=(0.25, 0.25, 0.25, 0.25),
+    collection_lag=4,
+    max_hazard=0.0,
+    seed=42,
 ):
     return PortfolioSimulator(
         initial_budget=budget,
         monthly_capital_injection=0,
         loan_term_months=term,
         monthly_interest_rate=rate,
-        payment_delay_probability=delay_probability,
-        delay_lag_weights=delay_weights,
-        customer_simulator=CustomerSimulator(),
+        default_collection_lag_months=collection_lag,
+        customer_simulator=CustomerSimulator(max_hazard=max_hazard),
+        rng=np.random.default_rng(seed),
     )
 
 
@@ -98,7 +101,7 @@ class TestPortfolioSimulator(unittest.TestCase):
             budget=1_000_000,
             term=3,
             rate=0,
-            delay_probability=0.0,
+            max_hazard=0.0,
         )
         portfolio.advance_month()
 
@@ -141,46 +144,49 @@ class TestPortfolioSimulator(unittest.TestCase):
             places=5,
         )
 
-    def test_delayed_installments_are_eventually_collected_without_credit_loss(self):
+    def test_missed_installment_is_full_or_zero_and_eventually_collected(self):
         portfolio = make_portfolio(
             budget=1_000_000,
             term=3,
             rate=0.0,
-            delay_probability=1.0,
-            delay_weights=(1.0, 0.0, 0.0, 0.0),
+            collection_lag=4,
+            max_hazard=1_000.0,  # Force the first eligible installment to be missed.
         )
         portfolio.advance_month()
-        customer = make_customer()
-        customer.risk = 100.0  # Make the risk-scaled late share equal the configured maximum.
-        portfolio.grant_loan(customer, 300_000, customer_id=1)
+        portfolio.grant_loan(make_customer(), 300_000, customer_id=1)
 
-        # Month 2: the first 100k principal installment is delayed to month 3.
+        # Month 2: the complete 100k installment is missed; zero is collected.
         result = portfolio.advance_month()
         self.assertAlmostEqual(result.principal_collected, 0.0)
         self.assertAlmostEqual(result.delayed_payment_amount_scheduled, 100_000)
         self.assertAlmostEqual(result.pending_delayed_receivables, 100_000)
-        self.assertFalse(portfolio.is_fully_settled)
         self.assertAlmostEqual(portfolio.available_budget, 700_000)
+        contract = portfolio.contracts[0]
+        self.assertTrue(contract.missed_installment_occurred)
+        self.assertFalse(contract.default_recognized)
 
-        # Month 3: collect installment 1 and delay installment 2 to month 4.
+        # The one missed installment is a single event; the later installments
+        # are paid in full on their contractual due dates.
         result = portfolio.advance_month()
         self.assertAlmostEqual(result.principal_collected, 100_000)
-        self.assertAlmostEqual(result.delayed_payment_amount_collected, 100_000)
-        self.assertAlmostEqual(result.delayed_payment_amount_scheduled, 100_000)
-        self.assertAlmostEqual(result.pending_delayed_receivables, 100_000)
-
-        # Month 4: the contractual loan matures but its last delayed payment
-        # is still due in month 5, so portfolio settlement is not complete.
+        self.assertAlmostEqual(result.delayed_payment_amount_scheduled, 0.0)
         result = portfolio.advance_month()
-        self.assertEqual(portfolio.contracts[0].status, "matured")
-        self.assertEqual(portfolio.active_contract_count, 0)
+        self.assertAlmostEqual(result.principal_collected, 100_000)
+        self.assertEqual(contract.status, "matured")
         self.assertFalse(portfolio.is_fully_settled)
-        self.assertAlmostEqual(result.pending_delayed_receivables, 100_000)
 
-        # Month 5: collect the final delayed amount.
+        # At month 6, the installment is >90 DPD; default is recognized before
+        # the same-month full collection of the overdue amount.
+        portfolio.advance_month()
+        self.assertEqual(portfolio.month, 5)
+        self.assertFalse(contract.default_recognized)
         result = portfolio.advance_month()
-        self.assertTrue(portfolio.is_fully_settled)
+        self.assertEqual(portfolio.month, 6)
+        self.assertTrue(contract.default_recognized)
+        self.assertEqual(result.expected_default_count, 1.0)
         self.assertAlmostEqual(result.principal_collected, 100_000)
+        self.assertTrue(contract.late_payment_collected)
+        self.assertTrue(portfolio.is_fully_settled)
         self.assertAlmostEqual(portfolio.cumulative_principal_collected, 300_000)
         self.assertAlmostEqual(
             portfolio.cumulative_delayed_payment_amount_scheduled,
@@ -189,22 +195,18 @@ class TestPortfolioSimulator(unittest.TestCase):
         self.assertAlmostEqual(portfolio.cumulative_net_default_loss, 0.0)
         self.assertAlmostEqual(portfolio.available_budget, 1_000_000)
 
-    def test_twelve_month_delay_extends_settlement_after_contract_maturity(self):
+    def test_twelve_month_collection_lag_extends_settlement_after_maturity(self):
         portfolio = make_portfolio(
             budget=1_000_000,
             term=1,
             rate=0.0,
-            delay_probability=1.0,
-            delay_weights=(0.0, 0.0, 0.0, 1.0),
+            collection_lag=12,
+            max_hazard=1_000.0,
         )
         portfolio.advance_month()
-        customer = make_customer()
-        customer.risk = 100.0
-        portfolio.grant_loan(customer, 300_000, customer_id=1)
+        portfolio.grant_loan(make_customer(), 300_000, customer_id=1)
 
-        # Contractual final installment is due in month 2; it will be collected
-        # 12 months later, in month 14.
-        portfolio.advance_month()
+        result = portfolio.advance_month()
         self.assertEqual(portfolio.month, 2)
         self.assertEqual(portfolio.contracts[0].status, "matured")
         self.assertEqual(portfolio.max_delay_months, 12)
@@ -215,15 +217,16 @@ class TestPortfolioSimulator(unittest.TestCase):
             result = portfolio.advance_month()
 
         self.assertEqual(portfolio.month, 14)
+        self.assertTrue(portfolio.contracts[0].default_recognized)
         self.assertTrue(portfolio.is_fully_settled)
         self.assertAlmostEqual(result.principal_collected, 300_000)
         self.assertAlmostEqual(portfolio.available_budget, 1_000_000)
 
-    def test_installment_delay_share_increases_with_customer_risk(self):
+    def test_monthly_miss_probability_increases_with_risk(self):
         portfolio = make_portfolio(
             budget=1_000_000,
             term=3,
-            delay_probability=0.10,
+            max_hazard=0.005,
         )
         portfolio.advance_month()
 
@@ -232,20 +235,18 @@ class TestPortfolioSimulator(unittest.TestCase):
         high_risk_customer = make_customer()
         high_risk_customer.risk = 80.0
 
-        low_risk_contract = portfolio.grant_loan(
-            low_risk_customer, 100_000, customer_id="low-risk"
-        )
-        high_risk_contract = portfolio.grant_loan(
-            high_risk_customer, 100_000, customer_id="high-risk"
-        )
+        low = portfolio.grant_loan(low_risk_customer, 100_000, customer_id="low")
+        high = portfolio.grant_loan(high_risk_customer, 100_000, customer_id="high")
 
-        self.assertGreater(
-            high_risk_contract.installment_delay_probability,
-            low_risk_contract.installment_delay_probability,
+        self.assertGreater(high.monthly_hazard, low.monthly_hazard)
+        self.assertGreater(high.monthly_miss_probability, low.monthly_miss_probability)
+        self.assertAlmostEqual(
+            high.monthly_miss_probability,
+            1.0 - np.exp(-high.monthly_hazard),
         )
-        self.assertLessEqual(
-            high_risk_contract.installment_delay_probability,
-            portfolio.payment_delay_probability,
+        self.assertAlmostEqual(
+            high.default_probability_over_term,
+            1.0 - np.exp(-high.monthly_hazard * high.term_months),
         )
 
     def test_recovery_rate_is_rejected_when_full_collection_is_assumed(self):
@@ -264,7 +265,7 @@ class TestPortfolioSimulator(unittest.TestCase):
             budget=initial_budget,
             term=term,
             rate=0.01,
-            delay_probability=0.0,
+            max_hazard=0.0,
         )
 
         portfolio.advance_month()
