@@ -63,6 +63,7 @@ class PortfolioLoanEnv(gym.Env):
         hazard_slope=0.08,
         hazard_center=60.0,
         max_hazard=0.005,
+        hazard_intercept=0.0,
         social_reward_weight=1.0,
         financial_reward_weight=1.0,
         financial_reward_scale=100_000_000,
@@ -134,6 +135,8 @@ class PortfolioLoanEnv(gym.Env):
             raise ValueError("hazard_center must be finite.")
         if not np.isfinite(max_hazard) or max_hazard < 0:
             raise ValueError("max_hazard must be finite and non-negative.")
+        if not np.isfinite(hazard_intercept):
+            raise ValueError("hazard_intercept must be finite.")
 
         if financial_reward_scale <= 0:
             raise ValueError("financial_reward_scale must be positive.")
@@ -173,6 +176,7 @@ class PortfolioLoanEnv(gym.Env):
         self.hazard_slope = float(hazard_slope)
         self.hazard_center = float(hazard_center)
         self.max_hazard = float(max_hazard)
+        self.hazard_intercept = float(hazard_intercept)
         # Stochastic missed-installment risk is always enabled through the
         # CustomerSimulator hazard model; queued receipts remain observable.
         self.delay_model_enabled = True
@@ -560,6 +564,7 @@ class PortfolioLoanEnv(gym.Env):
                 hazard_slope=self.hazard_slope,
                 hazard_center=self.hazard_center,
                 max_hazard=self.max_hazard,
+                hazard_intercept=self.hazard_intercept,
                 horizon_months=self.loan_term_months,
             ),
             rng=payment_rng,
