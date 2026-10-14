@@ -220,7 +220,7 @@ class PortfolioSimulator:
         return tuple(
             self._delayed_receivables.get(self.month + offset, {}).get("principal", 0.0)
             + self._delayed_receivables.get(self.month + offset, {}).get("interest", 0.0)
-            for offset in range(1, self.max_delay_months + 1)
+            for offset in range(1, 13)
         )
 
     @property
