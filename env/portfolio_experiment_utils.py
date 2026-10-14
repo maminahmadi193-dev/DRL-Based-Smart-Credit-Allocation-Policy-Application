@@ -163,6 +163,7 @@ def reference_risk_scores_after_loan(
         raise ValueError(f"Reference-risk calculation is missing columns: {missing}")
 
     amount = float(reference_loan_amount)
+    risk_simulator = CustomerSimulator()
     income = raw_df["MountlyIncome"].to_numpy(dtype=float)
     debt = raw_df["DebtAmount"].to_numpy(dtype=float)
     origin_amount = raw_df["OriginAmount"].to_numpy(dtype=float)
@@ -204,9 +205,9 @@ def reference_risk_scores_after_loan(
 
     updated_risk = (
         initial_risk
-        + 2.0 * debt_ratio_change
-        + debt_per_loan_change
-        + capacity_pressure
+        + risk_simulator.alpha * debt_ratio_change
+        + risk_simulator.beta * debt_per_loan_change
+        + risk_simulator.gamma * capacity_pressure
     )
     return np.clip(updated_risk, 0.0, 100.0)
 
