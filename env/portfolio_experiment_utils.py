@@ -7,6 +7,8 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
+from customer_simulator import CustomerSimulator
+
 
 FEATURE_COLUMNS = [
     "MountlyIncome",
@@ -135,3 +137,123 @@ def load_split_and_scaler(data_path=None, split_seed=42):
     }
 
     return train_raw, validation_raw, test_raw, scaler, split_info
+
+
+
+def reference_risk_scores_after_loan(
+    raw_df: pd.DataFrame,
+    reference_loan_amount: float = 100_000_000.0,
+) -> np.ndarray:
+    """
+    Estimate each row's risk score after a hypothetical reference loan.
+
+    This mirrors CustomerSimulator's current state and risk updates in a
+    vectorized way, using no observed default labels. It is used only to define
+    the exposure against which the population default-rate calibration is made.
+    """
+    if not np.isfinite(reference_loan_amount) or reference_loan_amount <= 0.0:
+        raise ValueError("reference_loan_amount must be finite and positive.")
+
+    required = [
+        "MountlyIncome", "DebtAmount", "OriginAmount", "LoanCounts",
+        "DebtRatio", "DebtPerLoan", "Risk_Min", "Risk_Max",
+    ]
+    missing = sorted(set(required) - set(raw_df.columns))
+    if missing:
+        raise ValueError(f"Reference-risk calculation is missing columns: {missing}")
+
+    amount = float(reference_loan_amount)
+    income = raw_df["MountlyIncome"].to_numpy(dtype=float)
+    debt = raw_df["DebtAmount"].to_numpy(dtype=float)
+    origin_amount = raw_df["OriginAmount"].to_numpy(dtype=float)
+    loan_counts = raw_df["LoanCounts"].to_numpy(dtype=float).astype(int)
+    previous_debt_ratio = raw_df["DebtRatio"].to_numpy(dtype=float)
+    previous_debt_per_loan = raw_df["DebtPerLoan"].to_numpy(dtype=float)
+    initial_risk = (
+        raw_df["Risk_Min"].to_numpy(dtype=float)
+        + raw_df["Risk_Max"].to_numpy(dtype=float)
+    ) / 2.0
+
+    updated_debt = debt + amount
+    updated_origin_amount = origin_amount + amount
+    updated_loan_counts = loan_counts + 1
+    updated_debt_ratio = np.divide(
+        updated_debt,
+        updated_origin_amount,
+        out=np.zeros_like(updated_debt, dtype=float),
+        where=updated_origin_amount > 0.0,
+    )
+    updated_debt_per_loan = np.divide(
+        updated_debt,
+        updated_loan_counts,
+        out=np.zeros_like(updated_debt, dtype=float),
+        where=updated_loan_counts > 0,
+    )
+
+    debt_ratio_change = updated_debt_ratio - previous_debt_ratio
+    debt_per_loan_change = np.zeros_like(updated_debt_per_loan)
+    has_previous_average = previous_debt_per_loan > 0.0
+    debt_per_loan_change[has_previous_average] = (
+        (updated_debt_per_loan[has_previous_average]
+         - previous_debt_per_loan[has_previous_average])
+        / previous_debt_per_loan[has_previous_average]
+    )
+    capacity_pressure = np.zeros_like(income)
+    has_income = income > 0.0
+    capacity_pressure[has_income] = amount / (income[has_income] + amount)
+
+    updated_risk = (
+        initial_risk
+        + 2.0 * debt_ratio_change
+        + debt_per_loan_change
+        + capacity_pressure
+    )
+    return np.clip(updated_risk, 0.0, 100.0)
+
+
+def calibrate_hazard_intercept_for_population(
+    raw_df: pd.DataFrame,
+    target_term_default_rate: float = 0.013,
+    reference_loan_amount: float = 100_000_000.0,
+    loan_term_months: int = 18,
+    max_hazard: float = 0.005,
+    hazard_slope: float = 0.08,
+    hazard_center: float = 60.0,
+) -> dict:
+    """
+    Calibrate the hazard logistic intercept against a population and a
+    transparent reference exposure. No applicant-level default labels are used.
+    """
+    reference_risks = reference_risk_scores_after_loan(
+        raw_df,
+        reference_loan_amount=reference_loan_amount,
+    )
+    intercept = CustomerSimulator.calibrate_hazard_intercept(
+        reference_risks=reference_risks,
+        target_term_default_rate=target_term_default_rate,
+        max_hazard=max_hazard,
+        hazard_slope=hazard_slope,
+        hazard_center=hazard_center,
+        horizon_months=loan_term_months,
+    )
+    z = np.clip(
+        hazard_slope * (np.clip(reference_risks, 0.0, 100.0) - hazard_center)
+        + intercept,
+        -60.0,
+        60.0,
+    )
+    monthly_hazards = max_hazard / (1.0 + np.exp(-z))
+    term_pds = -np.expm1(-monthly_hazards * int(loan_term_months))
+    return {
+        "method": "logistic_intercept_mean_term_pd_calibration",
+        "target_term_default_rate": float(target_term_default_rate),
+        "calibrated_reference_term_default_rate": float(np.mean(term_pds)),
+        "hazard_intercept": float(intercept),
+        "reference_loan_amount": float(reference_loan_amount),
+        "calibration_loan_term_months": int(loan_term_months),
+        "reference_population_rows": int(len(reference_risks)),
+        "risk_assumption": "post-loan risk under the reference loan amount",
+        "max_hazard_per_month": float(max_hazard),
+        "hazard_slope": float(hazard_slope),
+        "hazard_center": float(hazard_center),
+    }
