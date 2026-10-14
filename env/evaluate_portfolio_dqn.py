@@ -56,6 +56,7 @@ def evaluate_episode(run_name, model, config, raw_df, scaler, episode, seed):
         hazard_slope=float(config.get("hazard_slope", 0.08)),
         hazard_center=float(config.get("hazard_center", 60.0)),
         max_hazard=float(config.get("max_hazard", 0.005)),
+        hazard_intercept=float(config.get("hazard_intercept", 0.0)),
         social_reward_weight=float(config["social_reward_weight"]),
         financial_reward_weight=float(config["financial_reward_weight"]),
         financial_reward_scale=float(config["financial_reward_scale"]),
@@ -152,6 +153,14 @@ def evaluate_episode(run_name, model, config, raw_df, scaler, episode, seed):
         "net_default_loss": float(portfolio.cumulative_net_default_loss),
         "expected_default_count": float(portfolio.cumulative_expected_defaults),
         "recognized_default_count": float(portfolio.cumulative_recognized_defaults),
+        "realized_default_rate": (
+            float(portfolio.cumulative_recognized_defaults / len(portfolio.contracts))
+            if portfolio.contracts else 0.0
+        ),
+        "mean_contract_term_pd": (
+            float(np.mean([contract.default_probability_over_term for contract in portfolio.contracts]))
+            if portfolio.contracts else 0.0
+        ),
         "missed_installment_count": float(portfolio.cumulative_missed_installments),
         "delayed_payment_amount_scheduled": float(portfolio.cumulative_delayed_payment_amount_scheduled),
         "delayed_payment_amount_collected": float(portfolio.cumulative_delayed_payment_amount_collected),
@@ -204,11 +213,11 @@ def main():
             )
         with config_path.open("r", encoding="utf-8") as f:
             config = json.load(f)
-        if int(config.get("environment_model_version", 1)) < 2:
+        if int(config.get("environment_model_version", 1)) < 3:
             raise ValueError(
-                f"Model {run_name} was trained with the old fractional late-payment model. "
-                "Retrain it with env/train_portfolio_dqn.py before evaluating it under "
-                "the stochastic full-or-zero missed-installment model."
+                f"Model {run_name} predates population-calibrated hazard dynamics. "
+                "Retrain it with env/train_portfolio_dqn.py so the saved hazard "
+                "calibration is used during evaluation."
             )
         run_configs[run_name] = config
 
