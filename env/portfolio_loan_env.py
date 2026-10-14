@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 
 from customer_state import CustomerState
+from customer_simulator import CustomerSimulator
 from reward_engine import RewardEngine
 from portfolio_simulator import PortfolioSimulator
 
@@ -59,6 +60,9 @@ class PortfolioLoanEnv(gym.Env):
         recovery_rate=0.0,  # Deprecated compatibility argument; must remain zero.
         default_collection_lag_months=4,
         default_dpd_threshold_days=90,
+        hazard_slope=0.08,
+        hazard_center=60.0,
+        max_hazard=0.005,
         social_reward_weight=1.0,
         financial_reward_weight=1.0,
         financial_reward_scale=100_000_000,
@@ -119,6 +123,13 @@ class PortfolioLoanEnv(gym.Env):
         ):
             raise ValueError("default_dpd_threshold_days must be a positive integer.")
 
+        if not np.isfinite(hazard_slope) or hazard_slope < 0:
+            raise ValueError("hazard_slope must be finite and non-negative.")
+        if not np.isfinite(hazard_center):
+            raise ValueError("hazard_center must be finite.")
+        if not np.isfinite(max_hazard) or max_hazard < 0:
+            raise ValueError("max_hazard must be finite and non-negative.")
+
         if financial_reward_scale <= 0:
             raise ValueError("financial_reward_scale must be positive.")
 
@@ -154,6 +165,9 @@ class PortfolioLoanEnv(gym.Env):
         # Variable-cohort models get one extra feature for current cohort size.
         self.default_collection_lag_months = int(default_collection_lag_months)
         self.default_dpd_threshold_days = int(default_dpd_threshold_days)
+        self.hazard_slope = float(hazard_slope)
+        self.hazard_center = float(hazard_center)
+        self.max_hazard = float(max_hazard)
         # Stochastic missed-installment risk is always enabled through the
         # CustomerSimulator hazard model; queued receipts remain observable.
         self.delay_model_enabled = True
@@ -528,6 +542,12 @@ class PortfolioLoanEnv(gym.Env):
             monthly_interest_rate=self.monthly_interest_rate,
             default_collection_lag_months=self.default_collection_lag_months,
             default_dpd_threshold_days=self.default_dpd_threshold_days,
+            customer_simulator=CustomerSimulator(
+                hazard_slope=self.hazard_slope,
+                hazard_center=self.hazard_center,
+                max_hazard=self.max_hazard,
+                horizon_months=self.loan_term_months,
+            ),
             rng=self.np_random,
         )
 
