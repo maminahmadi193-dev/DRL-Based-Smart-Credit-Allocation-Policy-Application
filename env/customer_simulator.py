@@ -232,13 +232,29 @@ class CustomerSimulator:
         return float(hazard)
 
 
+    def _calculate_monthly_event_probability(
+        self,
+        hazard: float,
+    ) -> float:
+        """Probability of an event during one month under a constant hazard."""
+        hazard = float(hazard)
+        if not np.isfinite(hazard) or hazard < 0.0:
+            raise ValueError("hazard must be finite and non-negative.")
+        return float(-np.expm1(-hazard))
+
     def _calculate_default_probability(
         self,
         hazard: float,
-    )  -> float :
-        probability_of_default = 1 - np.exp(-hazard * self.horizon_months)
-
-        return float(probability_of_default)
+        horizon_months: int = None,
+    ) -> float:
+        """Cumulative probability of at least one event over the chosen term."""
+        hazard = float(hazard)
+        horizon = self.horizon_months if horizon_months is None else int(horizon_months)
+        if not np.isfinite(hazard) or hazard < 0.0:
+            raise ValueError("hazard must be finite and non-negative.")
+        if horizon <= 0:
+            raise ValueError("horizon_months must be positive.")
+        return float(-np.expm1(-hazard * horizon))
 
     # ======================================================
     # Simulation
