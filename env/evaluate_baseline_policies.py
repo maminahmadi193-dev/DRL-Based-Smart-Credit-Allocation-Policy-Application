@@ -553,6 +553,8 @@ def main():
         "mean_financial_pnl",
         "mean_net_default_loss",
         "mean_recognized_default_count",
+        "mean_realized_default_rate",
+        "mean_contract_term_pd",
         "mean_missed_installment_count",
         "mean_delayed_payment_amount_scheduled",
         "mean_delayed_payment_amount_collected",
