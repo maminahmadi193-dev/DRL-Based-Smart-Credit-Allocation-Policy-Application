@@ -593,8 +593,14 @@ class PortfolioLoanEnv(gym.Env):
                 "pending_delayed_receivables": (
                     self.portfolio.pending_delayed_receivables
                 ),
+                "delayed_payment_amount_scheduled": (
+                    monthly_result.delayed_payment_amount_scheduled
+                ),
                 "delayed_payment_amount_collected": (
                     monthly_result.delayed_payment_amount_collected
+                ),
+                "expected_delayed_installments": (
+                    monthly_result.expected_delayed_installments
                 ),
                 "is_fully_settled": self.portfolio.is_fully_settled,
             }
