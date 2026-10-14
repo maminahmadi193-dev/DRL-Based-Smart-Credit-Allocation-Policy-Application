@@ -126,16 +126,16 @@ class TestPortfolioLoanEnv(unittest.TestCase):
         df, _ = make_dataset(n=101)
         calibration = calibrate_hazard_intercept_for_population(
             raw_df=df,
-            target_term_default_rate=0.013,
+            target_annual_default_rate=0.013,
             reference_loan_amount=100_000_000,
-            loan_term_months=18,
+            calibration_horizon_months=12,
             max_hazard=0.005,
             hazard_slope=0.08,
             hazard_center=60.0,
         )
 
         self.assertAlmostEqual(
-            calibration["calibrated_reference_term_default_rate"],
+            calibration["calibrated_reference_annual_default_rate"],
             0.013,
             places=12,
         )
