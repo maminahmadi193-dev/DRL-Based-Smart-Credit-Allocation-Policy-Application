@@ -31,7 +31,7 @@ def parse_args():
     parser.add_argument("--hazard-slope", type=float, default=0.08)
     parser.add_argument("--hazard-center", type=float, default=60.0)
     parser.add_argument("--max-hazard", type=float, default=0.005)
-    parser.add_argument("--target-term-default-rate", type=float, default=0.013)
+    parser.add_argument("--target-annual-default-rate", type=float, default=0.013)
     parser.add_argument("--reference-loan-amount", type=float, default=100_000_000)
     parser.add_argument(
         "--stress-max-delay",
@@ -90,9 +90,9 @@ def main():
         )
         hazard_calibration = calibrate_hazard_intercept_for_population(
             raw_df=calibration_population,
-            target_term_default_rate=args.target_term_default_rate,
+            target_annual_default_rate=args.target_annual_default_rate,
             reference_loan_amount=args.reference_loan_amount,
-            loan_term_months=args.loan_term_months,
+            calibration_horizon_months=12,
             max_hazard=maximum_hazard,
             hazard_slope=args.hazard_slope,
             hazard_center=args.hazard_center,
