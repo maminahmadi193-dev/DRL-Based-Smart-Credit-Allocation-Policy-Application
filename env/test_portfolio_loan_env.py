@@ -550,6 +550,7 @@ class TestPortfolioLoanEnv(unittest.TestCase):
         self.assertEqual(env.phase, "settlement")
         self.assertAlmostEqual(info_1["principal_collected"], 0.0)
         self.assertAlmostEqual(info_1["interest_collected"], 0.0)
+        self.assertEqual(info_1["missed_installment_count"], 1.0)
         self.assertGreater(info_1["delayed_payment_amount_scheduled"], 0.0)
         self.assertGreater(info_1["pending_delayed_receivables"], 0.0)
         self.assertAlmostEqual(info_1["net_default_loss"], 0.0)
@@ -575,6 +576,8 @@ class TestPortfolioLoanEnv(unittest.TestCase):
         self.assertTrue(terminated)
         self.assertEqual(env.portfolio.month, 6)
         self.assertEqual(info_6["expected_default_count"], 1.0)
+        self.assertEqual(info_6["recognized_default_count"], 1.0)
+        self.assertEqual(info_6["missed_installment_count"], 0.0)
         self.assertGreater(info_6["delayed_payment_amount_collected"], 0.0)
         self.assertAlmostEqual(env.portfolio.cumulative_net_default_loss, 0.0)
         self.assertAlmostEqual(
