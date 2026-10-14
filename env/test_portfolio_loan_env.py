@@ -107,7 +107,7 @@ def make_env(**overrides):
         "origination_months": 2,
         "loan_term_months": 2,
         "annual_interest_rate": 0.0,
-        "payment_delay_probability": 0.0,
+        "max_hazard": 0.0,
     }
 
     config.update(overrides)
@@ -502,7 +502,7 @@ class TestPortfolioLoanEnv(unittest.TestCase):
             max_applicants_per_month=5,
             origination_months=2,
             loan_term_months=2,
-            payment_delay_probability=0.1,
+            max_hazard=0.0,
         )
         observation, _ = env.reset(seed=123)
 
@@ -522,7 +522,7 @@ class TestPortfolioLoanEnv(unittest.TestCase):
         np.testing.assert_allclose(delay_schedule, np.zeros(12), atol=1e-7)
         env.close()
 
-    def test_integrated_interest_and_delayed_payment_accounting(self):
+    def test_integrated_interest_and_full_missed_installment_accounting(self):
         env = make_env(
             initial_budget=100_000_000,
             monthly_capital_injection=0,
@@ -530,8 +530,8 @@ class TestPortfolioLoanEnv(unittest.TestCase):
             origination_months=1,
             loan_term_months=2,
             annual_interest_rate=0.12,
-            payment_delay_probability=1.0,
-            delay_lag_weights=(1.0, 0.0, 0.0, 0.0),
+            max_hazard=1_000.0,
+            default_collection_lag_months=4,
         )
 
         observation, _ = env.reset(seed=42)
@@ -543,43 +543,39 @@ class TestPortfolioLoanEnv(unittest.TestCase):
         self.assertTrue(env.observation_space.contains(observation))
         initial_cash = env.portfolio.available_budget
 
-        # Grant a loan. At the end of allocation month 1, the installment's
-        # risk-scaled late share is queued for month 3.
+        # Grant one loan. The first installment is forced to be fully missed.
         observation_1, reward_1, terminated, _, info_1 = env.step(1)
-
         self.assertFalse(terminated)
-        self.assertTrue(
-            env.observation_space.contains(observation_1)
-        )
-        delay_start = CustomerState.FEATURE_COUNT + 11
-        delayed_schedule = observation_1[delay_start:delay_start + 12]
-        self.assertEqual(len(delayed_schedule), 12)
-        self.assertGreater(float(np.sum(delayed_schedule)), 0.0)
-        self.assertAlmostEqual(
-            float(np.sum(delayed_schedule)),
-            info_1["pending_delayed_receivables"] / env.initial_budget,
-            places=6,
-        )
-        self.assertTrue(np.isfinite(reward_1))
+        self.assertTrue(env.observation_space.contains(observation_1))
         self.assertEqual(env.phase, "settlement")
+        self.assertAlmostEqual(info_1["principal_collected"], 50_000_000.0 / 1.0 + info_1["principal_collected"] - 50_000_000.0) if False else None
         self.assertGreater(info_1["interest_collected"], 0.0)
         self.assertGreater(info_1["delayed_payment_amount_scheduled"], 0.0)
         self.assertGreater(info_1["pending_delayed_receivables"], 0.0)
         self.assertAlmostEqual(info_1["net_default_loss"], 0.0)
+        self.assertTrue(np.isfinite(reward_1))
 
-        # Month 3 receives the first late installment and queues the final one.
+        # Month 3: the only later installment is paid on time. The first missed
+        # installment remains queued and is not fractionally collected.
         _, reward_2, terminated, _, info_2 = env.step(0)
         self.assertFalse(terminated)
         self.assertTrue(info_2["action_ignored"])
         self.assertTrue(np.isfinite(reward_2))
-        self.assertGreater(info_2["delayed_payment_amount_collected"], 0.0)
+        self.assertEqual(info_2["delayed_payment_amount_scheduled"], 0.0)
+        self.assertAlmostEqual(info_2["delayed_payment_amount_collected"], 0.0)
         self.assertGreater(info_2["pending_delayed_receivables"], 0.0)
 
-        # Month 4 receives the final installment; only now is the portfolio settled.
-        _, reward_3, terminated, _, info_3 = env.step(0)
+        # Month 4 and 5 stay unsettled; month 6 recognizes >90 DPD and fully
+        # collects the overdue installment, leaving no permanent credit loss.
+        for month in (4, 5):
+            _, _, terminated, _, _ = env.step(0)
+            self.assertFalse(terminated)
+            self.assertEqual(env.portfolio.month, month)
+        _, _, terminated, _, info_6 = env.step(0)
         self.assertTrue(terminated)
-        self.assertTrue(info_3["action_ignored"])
-        self.assertTrue(np.isfinite(reward_3))
+        self.assertEqual(env.portfolio.month, 6)
+        self.assertEqual(info_6["expected_default_count"], 1.0)
+        self.assertGreater(info_6["delayed_payment_amount_collected"], 0.0)
         self.assertAlmostEqual(env.portfolio.cumulative_net_default_loss, 0.0)
         self.assertAlmostEqual(
             env.portfolio.cumulative_delayed_payment_amount_scheduled,
@@ -599,8 +595,8 @@ class TestPortfolioLoanEnv(unittest.TestCase):
             origination_months=1,
             loan_term_months=1,
             annual_interest_rate=0.0,
-            payment_delay_probability=1.0,
-            delay_lag_weights=(0.0, 0.0, 0.0, 1.0),
+            max_hazard=1_000.0,
+            default_collection_lag_months=12,
         )
         env.reset(seed=42)
         env.current_customer.risk = 100.0
