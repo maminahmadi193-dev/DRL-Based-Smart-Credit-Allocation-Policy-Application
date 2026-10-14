@@ -4,7 +4,7 @@
 
 The portfolio simulator models a loan as a sequence of monthly installment due dates. On each due date, an installment is either paid in full or not paid at all. It is never split into fractional on-time and late shares.
 
-This is a deliberately limited, reproducible experiment model. It does not yet estimate risk parameters from observed repayment histories.
+This is a deliberately limited, reproducible experiment model. It does not estimate applicant-level default labels or fit a predictive PD model from observed repayment histories; it uses the aggregate rate only to calibrate the population level.
 
 ## Risk model and population calibration
 
@@ -32,7 +32,7 @@ The 100M reference amount is a modeling convention (it matches the smallest posi
 
 **Important rate-definition caveat:** a 1.3% point-in-time share of bank accounts or outstanding balance currently classified as 90+ DPD is not mathematically the same as a 1.3% cumulative probability of default over a 12-, 18-, 24-, or 36-month loan term. The implementation uses the latter interpretation so the experiment is operational. Before treating this as an empirical calibration, verify that the bank's 1.3% denominator, measurement period, and exposure basis are compatible with a cumulative loan-level rate. If the reported figure is a point-in-time prevalence, we need another assumption or portfolio/vintage data to translate it to a term PD.
 
-## ## Missed installment and default recognition
+## Missed installment and default recognition
 
 The current simplified contract behavior allows at most one missed installment per loan. If one installment is missed:
 
