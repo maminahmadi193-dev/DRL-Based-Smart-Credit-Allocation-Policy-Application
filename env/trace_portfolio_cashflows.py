@@ -148,6 +148,15 @@ def main():
                     portfolio.pending_delayed_receivables
                 ),
                 "active_contracts": int(portfolio.active_contract_count),
+                "recognized_defaults_this_month": int(
+                    info.get("recognized_default_count", 0)
+                ),
+                "cumulative_recognized_defaults": int(
+                    portfolio.cumulative_recognized_defaults
+                ),
+                "cumulative_missed_installments": int(
+                    portfolio.cumulative_missed_installments
+                ),
                 "cumulative_principal_collected": float(
                     portfolio.cumulative_principal_collected
                 ),
@@ -221,6 +230,8 @@ def main():
         print(f"Interest collected      : {portfolio.cumulative_interest_collected:,.2f}")
         print(f"Late amount scheduled   : {portfolio.cumulative_delayed_payment_amount_scheduled:,.2f}")
         print(f"Late amount collected   : {portfolio.cumulative_delayed_payment_amount_collected:,.2f}")
+        print(f"Missed installments     : {portfolio.cumulative_missed_installments}")
+        print(f"Recognized defaults     : {portfolio.cumulative_recognized_defaults}")
         print(f"Late receivables left   : {portfolio.pending_delayed_receivables:,.8f}")
         print(f"Final cash              : {portfolio.available_budget:,.2f}")
         print(f"Expected final cash     : {expected_final_cash:,.2f}")
