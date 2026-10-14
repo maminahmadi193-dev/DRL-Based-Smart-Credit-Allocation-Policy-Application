@@ -51,7 +51,6 @@ def evaluate_episode(run_name, model, config, raw_df, scaler, episode, seed):
         origination_months=int(config["origination_months"]),
         loan_term_months=int(config["loan_term_months"]),
         annual_interest_rate=float(config.get("annual_interest_rate", float(config.get("monthly_interest_rate", 0.0)) * 12.0)),
-        recovery_rate=float(config.get("recovery_rate", 0.0)),
         payment_delay_probability=float(config.get("payment_delay_probability", 0.0)),
         delay_lag_weights=config.get("delay_lag_weights", (0.4, 0.3, 0.2, 0.1)),
         social_reward_weight=float(config["social_reward_weight"]),
