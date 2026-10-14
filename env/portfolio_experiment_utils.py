@@ -99,7 +99,15 @@ def load_split_and_scaler(data_path=None, split_seed=42):
 
     df["Risk"] = (df["Risk_Min"] + df["Risk_Max"]) / 2.0
     df = df.replace([np.inf, -np.inf], np.nan)
-    df = df.dropna(subset=REQUIRED_RAW_COLUMNS + ["Risk"]).reset_index(drop=True)
+    missing_income_rows = int(df["MountlyIncome"].isna().sum())
+    # The source represents applicants without a recorded monthly salary as
+    # blank; business semantics for this project treat those as zero income.
+    df["MountlyIncome"] = df["MountlyIncome"].fillna(0.0)
+    non_income_required = [
+        column for column in REQUIRED_RAW_COLUMNS
+        if column != "MountlyIncome"
+    ]
+    df = df.dropna(subset=non_income_required + ["Risk"]).reset_index(drop=True)
 
     if df.empty:
         raise ValueError(f"No complete usable rows found in {source_path}")
@@ -129,6 +137,7 @@ def load_split_and_scaler(data_path=None, split_seed=42):
     split_info = {
         "dataset_path": str(source_path),
         "dataset_rows_used": int(len(df)),
+        "missing_income_imputed_to_zero_rows": missing_income_rows,
         "split_seed": int(split_seed),
         "train_rows": int(len(train_raw)),
         "validation_rows": int(len(validation_raw)),
@@ -199,7 +208,7 @@ def reference_risk_scores_after_loan(
          - previous_debt_per_loan[has_previous_average])
         / previous_debt_per_loan[has_previous_average]
     )
-    capacity_pressure = np.zeros_like(income)
+    capacity_pressure = np.ones_like(income)
     has_income = income > 0.0
     capacity_pressure[has_income] = amount / (income[has_income] + amount)
 
@@ -214,9 +223,9 @@ def reference_risk_scores_after_loan(
 
 def calibrate_hazard_intercept_for_population(
     raw_df: pd.DataFrame,
-    target_term_default_rate: float = 0.013,
+    target_annual_default_rate: float = 0.013,
     reference_loan_amount: float = 100_000_000.0,
-    loan_term_months: int = 18,
+    calibration_horizon_months: int = 12,
     max_hazard: float = 0.005,
     hazard_slope: float = 0.08,
     hazard_center: float = 60.0,
@@ -231,11 +240,11 @@ def calibrate_hazard_intercept_for_population(
     )
     intercept = CustomerSimulator.calibrate_hazard_intercept(
         reference_risks=reference_risks,
-        target_term_default_rate=target_term_default_rate,
+        target_term_default_rate=target_annual_default_rate,
         max_hazard=max_hazard,
         hazard_slope=hazard_slope,
         hazard_center=hazard_center,
-        horizon_months=loan_term_months,
+        horizon_months=calibration_horizon_months,
     )
     z = np.clip(
         hazard_slope * (np.clip(reference_risks, 0.0, 100.0) - hazard_center)
@@ -244,14 +253,14 @@ def calibrate_hazard_intercept_for_population(
         60.0,
     )
     monthly_hazards = max_hazard / (1.0 + np.exp(-z))
-    term_pds = -np.expm1(-monthly_hazards * int(loan_term_months))
+    annual_pds = -np.expm1(-monthly_hazards * int(calibration_horizon_months))
     return {
-        "method": "logistic_intercept_mean_term_pd_calibration",
-        "target_term_default_rate": float(target_term_default_rate),
-        "calibrated_reference_term_default_rate": float(np.mean(term_pds)),
+        "method": "logistic_intercept_mean_annual_pd_calibration",
+        "target_annual_default_rate": float(target_annual_default_rate),
+        "calibrated_reference_annual_default_rate": float(np.mean(annual_pds)),
         "hazard_intercept": float(intercept),
         "reference_loan_amount": float(reference_loan_amount),
-        "calibration_loan_term_months": int(loan_term_months),
+        "calibration_horizon_months": int(calibration_horizon_months),
         "reference_population_rows": int(len(reference_risks)),
         "risk_assumption": "post-loan risk under the reference loan amount",
         "max_hazard_per_month": float(max_hazard),
