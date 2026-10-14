@@ -550,7 +550,6 @@ class TestPortfolioLoanEnv(unittest.TestCase):
         self.assertEqual(env.phase, "settlement")
         self.assertAlmostEqual(info_1["principal_collected"], 0.0)
         self.assertAlmostEqual(info_1["interest_collected"], 0.0)
-        self.assertGreater(info_1["interest_collected"], 0.0)
         self.assertGreater(info_1["delayed_payment_amount_scheduled"], 0.0)
         self.assertGreater(info_1["pending_delayed_receivables"], 0.0)
         self.assertAlmostEqual(info_1["net_default_loss"], 0.0)
