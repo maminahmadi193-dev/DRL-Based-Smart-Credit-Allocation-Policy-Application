@@ -246,6 +246,9 @@ def main():
                 else "legacy"
             ),
             "environment_class": "PortfolioLoanEnv",
+            "environment_model_version": 2,
+            "payment_model": "stochastic_full_or_zero_installment",
+            "default_definition": "a missed installment is defaulted after > default_dpd_threshold_days",
             **split_info,
         })
         config_path = run_dir / "config.json"
