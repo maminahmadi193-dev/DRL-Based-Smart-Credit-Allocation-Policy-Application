@@ -198,7 +198,13 @@ def load_data(data_path: str | None, require_real_data: bool, project_root: Path
             df[column] = pd.to_numeric(df[column], errors="coerce")
         df["Risk"] = (df["Risk_Min"] + df["Risk_Max"]) / 2.0
         df = df.replace([np.inf, -np.inf], np.nan)
-        df = df.dropna(subset=REQUIRED_RAW_COLUMNS + ["Risk"]).reset_index(drop=True)
+        # Blank monthly-income cells in this dataset represent no recorded salary.
+        df["MountlyIncome"] = df["MountlyIncome"].fillna(0.0)
+        non_income_required = [
+            column for column in REQUIRED_RAW_COLUMNS
+            if column != "MountlyIncome"
+        ]
+        df = df.dropna(subset=non_income_required + ["Risk"]).reset_index(drop=True)
         if df.empty:
             raise ValueError(f"No complete usable rows found in {source_path}")
         scaler = StandardScaler().fit(df[FEATURE_COLUMNS])
