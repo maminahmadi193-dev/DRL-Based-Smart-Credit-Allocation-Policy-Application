@@ -106,6 +106,7 @@ class PortfolioSimulator:
         monthly_interest_rate: float = 0.0,
         recovery_rate: float = 0.0,
         default_collection_lag_months: int = 4,
+        default_dpd_threshold_days: int = 90,
         customer_simulator: Optional[CustomerSimulator] = None,
         rng: Optional[np.random.Generator] = None,
     ):
@@ -145,8 +146,13 @@ class PortfolioSimulator:
         ):
             raise ValueError(
                 "default_collection_lag_months must be an integer from 4 to 12; "
-                "the lag must allow the installment to exceed 90 days past due."
+                "the lag must allow the installment to exceed the DPD threshold."
             )
+        if (
+            not isinstance(default_dpd_threshold_days, int)
+            or default_dpd_threshold_days < 1
+        ):
+            raise ValueError("default_dpd_threshold_days must be a positive integer.")
 
         self.initial_budget = float(initial_budget)
         self.cash_available = float(initial_budget)
@@ -159,6 +165,7 @@ class PortfolioSimulator:
         self.monthly_interest_rate = float(monthly_interest_rate)
         self.recovery_rate = 0.0  # Deprecated compatibility field; no permanent loss.
         self.default_collection_lag_months = int(default_collection_lag_months)
+        self.default_dpd_threshold_days = int(default_dpd_threshold_days)
         self.max_delay_months = self.default_collection_lag_months
         self._delayed_receivables: dict[int, dict[str, object]] = {}
         self.rng = rng if rng is not None else np.random.default_rng()
@@ -435,7 +442,7 @@ class PortfolioSimulator:
                 contract.missed_installment_occurred
                 and not contract.default_recognized
                 and contract.missed_due_date is not None
-                and (current_date - contract.missed_due_date).days > 90
+                and (current_date - contract.missed_due_date).days > self.default_dpd_threshold_days
             ):
                 contract.default_recognized = True
                 contract.default_recognition_date = current_date
