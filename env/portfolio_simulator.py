@@ -15,7 +15,7 @@ CustomerId = Optional[Union[str, int]]
 
 @dataclass
 class LoanContract:
-    """One loan, tracked using expected-value accounting."""
+    """One contract with a stochastic full-or-zero installment path."""
 
     loan_id: int
     customer_id: CustomerId
@@ -49,7 +49,7 @@ class LoanContract:
 
 @dataclass
 class MonthlyPortfolioResult:
-    """Expected collections, delayed receivables, and cash flows for one month."""
+    """Realized monthly collections, default recognitions, and cash flows."""
 
     month: int
     cash_before: float
@@ -153,6 +153,11 @@ class PortfolioSimulator:
             or default_dpd_threshold_days < 1
         ):
             raise ValueError("default_dpd_threshold_days must be a positive integer.")
+        if default_collection_lag_months * 30 <= default_dpd_threshold_days:
+            raise ValueError(
+                "The configured collection lag must extend beyond the DPD threshold "
+                "at the monthly checkpoint cadence."
+            )
 
         self.initial_budget = float(initial_budget)
         self.cash_available = float(initial_budget)
@@ -205,7 +210,7 @@ class PortfolioSimulator:
 
     @property
     def pending_delayed_receivables(self) -> float:
-        """Total expected late principal and interest not yet collected."""
+        """Total principal and interest on missed installments not yet collected."""
         return sum(
             amount.get("principal", 0.0) + amount.get("interest", 0.0)
             for amount in self._delayed_receivables.values()
