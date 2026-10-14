@@ -20,23 +20,6 @@ from portfolio_experiment_utils import load_split_and_scaler, project_root
 from portfolio_loan_env import PortfolioLoanEnv
 
 
-def parse_delay_lag_weights(value):
-    try:
-        weights = tuple(float(part.strip()) for part in value.split(","))
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(
-            "Delay lag weights must be comma-separated numbers."
-        ) from exc
-    if len(weights) != 4 or any(not math.isfinite(weight) or weight < 0 for weight in weights):
-        raise argparse.ArgumentTypeError(
-            "Provide four finite, non-negative weights for delays of 1, 2, 3, and 12 months."
-        )
-    total = sum(weights)
-    if total <= 0:
-        raise argparse.ArgumentTypeError("At least one delay lag weight must be positive.")
-    return tuple(weight / total for weight in weights)
-
-
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Train a DQN agent using PortfolioLoanEnv."
@@ -70,16 +53,25 @@ def parse_args():
     parser.add_argument("--loan-term-months", type=int, choices=[12, 18, 24, 36], default=18, help="Fixed loan term used for all contracts in this run.")
     parser.add_argument("--annual-interest-rate", type=float, default=0.04, help="Nominal annual interest rate; converted to monthly rate internally.")
     parser.add_argument(
-        "--payment-delay-probability",
-        type=float,
-        default=0.10,
-        help="Illustrative maximum expected late share; scaled by post-loan customer risk score / 100 (not empirically calibrated).",
+        "--default-collection-lag-months",
+        type=int,
+        choices=range(4, 13),
+        default=4,
+        help="Full collection lag for the one missed installment: 4 months base, 12 months stress.",
     )
     parser.add_argument(
-        "--delay-lag-weights",
-        type=parse_delay_lag_weights,
-        default=(0.25, 0.25, 0.25, 0.25),
-        help="Weights for late collections after 1, 2, 3, and 12 months; normalized internally.",
+        "--default-dpd-threshold-days",
+        type=int,
+        default=90,
+        help="Recognize default only when a missed installment is more than this many days past due.",
+    )
+    parser.add_argument("--hazard-slope", type=float, default=0.08)
+    parser.add_argument("--hazard-center", type=float, default=60.0)
+    parser.add_argument(
+        "--max-hazard",
+        type=float,
+        default=0.005,
+        help="Maximum monthly hazard in the risk-to-hazard mapping; must be calibrated before predictive claims.",
     )
     parser.add_argument("--social-reward-weight", type=float, default=1.0)
     parser.add_argument("--financial-reward-weight", type=float, default=1.0)
@@ -120,10 +112,16 @@ def main():
         raise ValueError("Initial budget and financial reward scale must be positive.")
     if not math.isfinite(args.annual_interest_rate) or args.annual_interest_rate < 0:
         raise ValueError("--annual-interest-rate must be finite and non-negative")
-    if not math.isfinite(args.payment_delay_probability) or not 0.0 <= args.payment_delay_probability <= 1.0:
-        raise ValueError("--payment-delay-probability must be between 0 and 1")
-    if sum(args.delay_lag_weights) <= 0:
-        raise ValueError("--delay-lag-weights must sum to a positive value")
+    if args.default_dpd_threshold_days < 1:
+        raise ValueError("--default-dpd-threshold-days must be >= 1")
+    if not 4 <= args.default_collection_lag_months <= 12:
+        raise ValueError("--default-collection-lag-months must be between 4 and 12")
+    if not math.isfinite(args.hazard_slope) or args.hazard_slope < 0:
+        raise ValueError("--hazard-slope must be finite and non-negative")
+    if not math.isfinite(args.hazard_center):
+        raise ValueError("--hazard-center must be finite")
+    if not math.isfinite(args.max_hazard) or args.max_hazard < 0:
+        raise ValueError("--max-hazard must be finite and non-negative")
 
     root = project_root()
     output_root = Path(args.output_dir).expanduser()
@@ -164,8 +162,11 @@ def main():
         origination_months=args.origination_months,
         loan_term_months=args.loan_term_months,
         annual_interest_rate=args.annual_interest_rate,
-        payment_delay_probability=args.payment_delay_probability,
-        delay_lag_weights=args.delay_lag_weights,
+        default_collection_lag_months=args.default_collection_lag_months,
+        default_dpd_threshold_days=args.default_dpd_threshold_days,
+        hazard_slope=args.hazard_slope,
+        hazard_center=args.hazard_center,
+        max_hazard=args.max_hazard,
         social_reward_weight=args.social_reward_weight,
         financial_reward_weight=args.financial_reward_weight,
         financial_reward_scale=args.financial_reward_scale,
@@ -219,10 +220,11 @@ def main():
     print(f"Loan term              : {args.loan_term_months}")
     print(f"Annual nominal rate    : {args.annual_interest_rate:.2%}")
     print(f"Monthly rate (derived) : {args.annual_interest_rate / 12.0:.6%}")
-    print(f"Max late-payment share  : {args.payment_delay_probability:.1%} (risk-scaled; illustrative)")
-    print(f"Delay lags (months)    : { (1, 2, 3, 12) }")
-    print(f"Delay lag weights      : {args.delay_lag_weights}")
-    print("Permanent credit loss  : disabled (all delayed installments are eventually collected)")
+    print(f"Monthly hazard maximum : {args.max_hazard:.6f}")
+    print(f"DPD default threshold  : >{args.default_dpd_threshold_days} days")
+    print(f"Missed-payment collect : {args.default_collection_lag_months} months after due date")
+    print("Payment behavior       : each installment is paid in full or missed in full")
+    print("Permanent credit loss  : disabled (the missed installment is eventually collected in full)")
     print("-" * 76)
 
     try:
