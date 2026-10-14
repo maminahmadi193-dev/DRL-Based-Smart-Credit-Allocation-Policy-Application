@@ -367,6 +367,19 @@ def summarize(episodes_df: pd.DataFrame) -> pd.DataFrame:
             values = pd.to_numeric(group[metric], errors="coerce")
             row[f"mean_{metric}"] = float(values.mean())
             row[f"std_{metric}"] = float(values.std(ddof=1)) if len(values) > 1 else 0.0
+        # Keep the arithmetic mean of episode-level rates, but also report a
+        # pooled rate computed from total recognized defaults / total loans.
+        # These values differ when episodes have different numbers of loans.
+        episode_rates = pd.to_numeric(group["realized_default_rate"], errors="coerce")
+        mean_episode_rate = float(episode_rates.mean()) if len(episode_rates) else 0.0
+        total_loans = float(pd.to_numeric(group["loans_granted"], errors="coerce").sum())
+        total_defaults = float(pd.to_numeric(group["recognized_default_count"], errors="coerce").sum())
+        row["mean_episode_realized_default_rate"] = mean_episode_rate
+        row["pooled_realized_default_rate"] = (
+            total_defaults / total_loans if total_loans > 0 else 0.0
+        )
+        # Retain the previous column name for compatibility with existing CSV consumers.
+        row["mean_realized_default_rate"] = mean_episode_rate
         rows.append(row)
     return pd.DataFrame(rows)
 
@@ -546,6 +559,9 @@ def main():
             "social_reward": "Sum of the environment's reported social reward component.",
             "financial_pnl": "Interest collected minus net default loss, in currency units.",
             "net_default_loss": "Zero under the full-collection assumption; delayed receipts are tracked separately.",
+            "realized_default_rate": "Per-episode recognized defaults divided by loans granted in that episode.",
+            "mean_episode_realized_default_rate": "Arithmetic mean of episode-level realized default rates; each episode has equal weight.",
+            "pooled_realized_default_rate": "Total recognized defaults divided by total loans granted across all episodes.",
             "final_cash": "Available cash after all outstanding loans have been serviced.",
         },
     })
@@ -559,7 +575,8 @@ def main():
         "mean_financial_pnl",
         "mean_net_default_loss",
         "mean_recognized_default_count",
-        "mean_realized_default_rate",
+        "mean_episode_realized_default_rate",
+        "pooled_realized_default_rate",
         "mean_contract_term_pd",
         "mean_missed_installment_count",
         "mean_delayed_payment_amount_scheduled",

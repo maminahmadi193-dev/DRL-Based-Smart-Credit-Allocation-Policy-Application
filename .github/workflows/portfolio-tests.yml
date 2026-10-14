@@ -33,7 +33,7 @@ jobs:
       - name: Run portfolio and reward unit tests
         working-directory: env
         run: |
-          python -m unittest test_portfolio_simulator test_portfolio_loan_env test_reward_engine -v
+          python -m unittest test_portfolio_simulator test_portfolio_loan_env test_reward_engine test_baseline_policy_metrics -v
 
       - name: Smoke-test baseline policy pipeline
         run: |
