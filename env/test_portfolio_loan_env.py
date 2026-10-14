@@ -502,6 +502,32 @@ class TestPortfolioLoanEnv(unittest.TestCase):
             places=4,
         )
 
+    def test_random_cohorts_and_delay_schedule_share_one_observation(self):
+        env = make_env(
+            applicants_per_month=4,
+            min_applicants_per_month=2,
+            max_applicants_per_month=5,
+            origination_months=2,
+            loan_term_months=2,
+            payment_delay_probability=0.1,
+        )
+        observation, _ = env.reset(seed=123)
+
+        self.assertEqual(env.PORTFOLIO_FEATURE_COUNT, 28)
+        self.assertEqual(
+            observation.shape,
+            (CustomerState.FEATURE_COUNT + env.PORTFOLIO_FEATURE_COUNT,),
+        )
+        self.assertTrue(env.observation_space.contains(observation))
+
+        # The last 12 entries of the portfolio feature block describe
+        # expected receipts due 1..12 months from now; a new episode is empty.
+        delay_start = CustomerState.FEATURE_COUNT + 12
+        delay_schedule = observation[delay_start:delay_start + 12]
+        self.assertEqual(len(delay_schedule), 12)
+        np.testing.assert_allclose(delay_schedule, np.zeros(12), atol=1e-7)
+        env.close()
+
     def test_integrated_interest_and_delayed_payment_accounting(self):
         env = make_env(
             initial_budget=100_000_000,
@@ -519,7 +545,7 @@ class TestPortfolioLoanEnv(unittest.TestCase):
             observation.shape,
             (CustomerState.FEATURE_COUNT + env.PORTFOLIO_FEATURE_COUNT,),
         )
-        self.assertEqual(env.PORTFOLIO_FEATURE_COUNT, 16)
+        self.assertEqual(env.PORTFOLIO_FEATURE_COUNT, 27)
         self.assertTrue(env.observation_space.contains(observation))
         initial_cash = env.portfolio.available_budget
 
