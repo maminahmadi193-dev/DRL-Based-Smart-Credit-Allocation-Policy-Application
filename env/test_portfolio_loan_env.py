@@ -551,9 +551,21 @@ class TestPortfolioLoanEnv(unittest.TestCase):
 
         # Grant a loan. At the end of allocation month 1, the installment's
         # risk-scaled late share is queued for month 3.
-        _, reward_1, terminated, _, info_1 = env.step(1)
+        observation_1, reward_1, terminated, _, info_1 = env.step(1)
 
         self.assertFalse(terminated)
+        self.assertTrue(
+            env.observation_space.contains(observation_1)
+        )
+        delay_start = CustomerState.FEATURE_COUNT + 11
+        delayed_schedule = observation_1[delay_start:delay_start + 12]
+        self.assertEqual(len(delayed_schedule), 12)
+        self.assertGreater(float(np.sum(delayed_schedule)), 0.0)
+        self.assertAlmostEqual(
+            float(np.sum(delayed_schedule)),
+            info_1["pending_delayed_receivables"] / env.initial_budget,
+            places=6,
+        )
         self.assertTrue(np.isfinite(reward_1))
         self.assertEqual(env.phase, "settlement")
         self.assertGreater(info_1["interest_collected"], 0.0)
