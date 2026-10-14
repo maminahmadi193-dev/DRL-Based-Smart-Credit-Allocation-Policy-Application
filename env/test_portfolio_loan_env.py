@@ -140,7 +140,7 @@ class TestPortfolioLoanEnv(unittest.TestCase):
             places=12,
         )
         self.assertEqual(calibration["reference_population_rows"], len(df))
-        self.assertEqual(calibration["calibration_loan_term_months"], 18)
+        self.assertEqual(calibration["calibration_horizon_months"], 12)
 
     def test_reset_returns_valid_observation(self):
         env = make_env()
