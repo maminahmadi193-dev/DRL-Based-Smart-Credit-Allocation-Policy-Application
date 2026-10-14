@@ -212,7 +212,7 @@ class TestPortfolioLoanEnv(unittest.TestCase):
         env.reset(seed=42)
 
         # Zero-loan actions isolate the calendar logic
-        # from repayments and credit losses.
+        # from loan cash flows.
         for expected_allocation_month in (1, 2):
             _, _, terminated, _, info = env.step(0)
 
@@ -273,8 +273,6 @@ class TestPortfolioLoanEnv(unittest.TestCase):
 
         env.reset(seed=42)
 
-        # Disable default risk for this deterministic accounting test.
-        env.portfolio.customer_simulator.max_hazard = 0.0
 
         initial_budget = env.portfolio.available_budget
 
@@ -446,7 +444,6 @@ class TestPortfolioLoanEnv(unittest.TestCase):
             annual_interest_rate=0.04,
         )
         env.reset(seed=42)
-        env.portfolio.customer_simulator.max_hazard = 0.0
 
         _, _, terminated, _, info = env.step(1)
 
@@ -468,7 +465,6 @@ class TestPortfolioLoanEnv(unittest.TestCase):
             annual_interest_rate=0.0,
         )
         env.reset(seed=42)
-        env.portfolio.customer_simulator.max_hazard = 0.0
         initial_cash = env.portfolio.available_budget
 
         # One new 100M loan in each of the 12 origination months.
