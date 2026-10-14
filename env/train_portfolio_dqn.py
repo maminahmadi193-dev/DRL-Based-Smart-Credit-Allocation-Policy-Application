@@ -76,7 +76,7 @@ def parse_args():
         "--max-hazard",
         type=float,
         default=0.005,
-        help="Maximum monthly hazard in the risk-to-hazard mapping; must be calibrated before predictive claims.",
+        help="Maximum monthly hazard; the population rate is calibrated through a logistic intercept.",
     )
     parser.add_argument("--target-term-default-rate", type=float, default=0.013, help="Target cumulative 90+ DPD default probability over the loan term for reference exposure (default: 1.3%).")
     parser.add_argument("--reference-loan-amount", type=float, default=100_000_000, help="Reference loan amount for population calibration.")
