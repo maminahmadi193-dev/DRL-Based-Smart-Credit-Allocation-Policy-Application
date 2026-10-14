@@ -390,7 +390,7 @@ class TestPortfolioLoanEnv(unittest.TestCase):
                 initial_obs.shape,
                 (CustomerState.FEATURE_COUNT + env.PORTFOLIO_FEATURE_COUNT,),
             )
-            self.assertEqual(env.PORTFOLIO_FEATURE_COUNT, 16)
+            self.assertEqual(env.PORTFOLIO_FEATURE_COUNT, 28)
             self.assertAlmostEqual(
                 float(initial_obs[CustomerState.FEATURE_COUNT + 3]),
                 len(env.current_cohort_indices) / env.max_applicants_per_month,
