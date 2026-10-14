@@ -357,9 +357,10 @@ def parse_delay_lag_weights(value):
         raise argparse.ArgumentTypeError(
             "Provide four finite, non-negative weights for delays of 1, 2, 3, and 12 months."
         )
-    if sum(weights) <= 0:
+    total = sum(weights)
+    if total <= 0:
         raise argparse.ArgumentTypeError("At least one delay lag weight must be positive.")
-    return weights
+    return tuple(weight / total for weight in weights)
 
 
 def parse_args():
