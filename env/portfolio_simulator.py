@@ -1,7 +1,10 @@
 
 from dataclasses import dataclass
+from datetime import date
 import math
 from typing import Optional, Union
+
+import numpy as np
 
 from customer_state import CustomerState
 from customer_simulator import CustomerSimulator
@@ -22,13 +25,23 @@ class LoanContract:
     outstanding_principal: float
     monthly_payment: float
     monthly_interest_rate: float
-    installment_delay_probability: float
+    monthly_hazard: float
+    monthly_miss_probability: float
+    default_probability_over_term: float
 
     term_months: int
     remaining_months: int
 
-    # Kept for compatibility with the expected-value accounting model.
-    # In the full-collection scenario it remains 1 until maturity.
+    # At most one default-causing missed installment is simulated per loan.
+    missed_installment_occurred: bool = False
+    missed_due_date: Optional[date] = None
+    missed_principal: float = 0.0
+    missed_interest: float = 0.0
+    default_recognized: bool = False
+    default_recognition_date: Optional[date] = None
+    late_payment_collected: bool = False
+
+    # Retained for compatibility with existing reporting code.
     survival_probability: float = 1.0
 
     status: str = "active"
@@ -72,10 +85,15 @@ class PortfolioSimulator:
     - A loan originated in month t first becomes eligible
       for repayment processing when entering month t + 1.
 
-    All contractual installments are ultimately collected. A configurable
-    fraction may be delayed by 1, 2, 3, or 12 months. Since this is an
-    expected-value simulator, each installment is split deterministically
-    between on-time and future collections. No permanent credit loss is modeled.
+    Each installment is either paid in full on its due date or not paid at all.
+    A seeded random draw controls the first missed installment for each loan:
+    after that first missed installment, later scheduled installments are paid
+    on time. The missed installment is collected in full after a configurable
+    lag (four months in the base case, twelve months in stress tests).
+
+    Default is recognized at the first monthly checkpoint where days past due
+    is strictly greater than 90. This is a stochastic path simulator, not
+    expected-fraction accounting. No permanent credit loss is modeled.
     """
 
     EPSILON = 1e-6
@@ -87,9 +105,9 @@ class PortfolioSimulator:
         loan_term_months: int = 18,
         monthly_interest_rate: float = 0.0,
         recovery_rate: float = 0.0,
-        payment_delay_probability: float = 0.0,
-        delay_lag_weights=(0.25, 0.25, 0.25, 0.25),
+        default_collection_lag_months: int = 4,
         customer_simulator: Optional[CustomerSimulator] = None,
+        rng: Optional[np.random.Generator] = None,
     ):
         if not math.isfinite(initial_budget) or initial_budget < 0:
             raise ValueError("initial_budget must be finite and non-negative.")
@@ -117,22 +135,18 @@ class PortfolioSimulator:
             raise ValueError("recovery_rate must be between 0 and 1.")
         if recovery_rate != 0.0:
             raise ValueError(
-                "recovery_rate is not used when all delayed payments are "
-                "assumed to be fully collected. Use payment_delay_probability "
-                "to model timing delays instead."
+                "recovery_rate is not used when all overdue installments are "
+                "assumed to be fully collected. It must remain zero."
             )
-        if not math.isfinite(payment_delay_probability) or not 0.0 <= payment_delay_probability <= 1.0:
-            raise ValueError("payment_delay_probability must be between 0 and 1.")
-        if len(delay_lag_weights) != 4:
-            raise ValueError("delay_lag_weights must contain four weights for lags 1, 2, 3, and 12 months.")
-        delay_lag_weights = tuple(float(weight) for weight in delay_lag_weights)
-        if any(not math.isfinite(weight) or weight < 0.0 for weight in delay_lag_weights):
-            raise ValueError("delay_lag_weights must be finite and non-negative.")
-        weight_sum = sum(delay_lag_weights)
-        if payment_delay_probability > 0.0 and weight_sum <= 0.0:
-            raise ValueError("At least one delay_lag_weight must be positive when payment delays are enabled.")
-        if weight_sum > 0.0:
-            delay_lag_weights = tuple(weight / weight_sum for weight in delay_lag_weights)
+        if (
+            not isinstance(default_collection_lag_months, int)
+            or default_collection_lag_months < 4
+            or default_collection_lag_months > 12
+        ):
+            raise ValueError(
+                "default_collection_lag_months must be an integer from 4 to 12; "
+                "the lag must allow the installment to exceed 90 days past due."
+            )
 
         self.initial_budget = float(initial_budget)
         self.cash_available = float(initial_budget)
@@ -143,20 +157,11 @@ class PortfolioSimulator:
 
         self.loan_term_months = int(loan_term_months)
         self.monthly_interest_rate = float(monthly_interest_rate)
-        self.recovery_rate = 0.0  # Retained as a deprecated compatibility field.
-        self.payment_delay_probability = float(payment_delay_probability)
-        self.delay_lags_months = (1, 2, 3, 12)
-        self.delay_lag_weights = delay_lag_weights
-        self.max_delay_months = (
-            max(
-                lag
-                for lag, weight in zip(self.delay_lags_months, self.delay_lag_weights)
-                if weight > 0.0
-            )
-            if self.payment_delay_probability > 0.0
-            else 0
-        )
-        self._delayed_receivables: dict[int, dict[str, float]] = {}
+        self.recovery_rate = 0.0  # Deprecated compatibility field; no permanent loss.
+        self.default_collection_lag_months = int(default_collection_lag_months)
+        self.max_delay_months = self.default_collection_lag_months
+        self._delayed_receivables: dict[int, dict[str, object]] = {}
+        self.rng = rng if rng is not None else np.random.default_rng()
 
         self.customer_simulator = (
             customer_simulator
@@ -243,8 +248,12 @@ class PortfolioSimulator:
                     balance,
                     max(0.0, contract.monthly_payment - interest_due),
                 )
-            on_time_share = 1.0 - contract.installment_delay_probability
-            scheduled += (principal_due + interest_due) * on_time_share
+            expected_on_time_share = (
+                1.0
+                if contract.missed_installment_occurred
+                else 1.0 - contract.monthly_miss_probability
+            )
+            scheduled += (principal_due + interest_due) * expected_on_time_share
         delayed = self._delayed_receivables.get(self.month + 1, {})
         return scheduled + delayed.get("principal", 0.0) + delayed.get("interest", 0.0)
 
@@ -338,14 +347,21 @@ class PortfolioSimulator:
             )
         )
 
-        # Customer risk changes the expected share of the installment paid late.
-        # This is a transparent linear proxy, not an empirically calibrated PD model.
-        risk_factor = min(
-            1.0,
-            max(0.0, float(customer_after_loan.risk) / 100.0),
+        # Convert the updated customer risk to a monthly hazard and probability.
+        # PD is specific to this experiment's contractual loan term.
+        monthly_hazard = self.customer_simulator._estimate_hazard(
+            customer_after_loan
         )
-        installment_delay_probability = (
-            self.payment_delay_probability * risk_factor
+        monthly_miss_probability = (
+            self.customer_simulator._calculate_monthly_event_probability(
+                monthly_hazard
+            )
+        )
+        default_probability_over_term = (
+            self.customer_simulator._calculate_default_probability(
+                monthly_hazard,
+                horizon_months=self.loan_term_months,
+            )
         )
 
         monthly_payment = self._calculate_monthly_payment(amount)
@@ -358,7 +374,9 @@ class PortfolioSimulator:
             outstanding_principal=amount,
             monthly_payment=monthly_payment,
             monthly_interest_rate=self.monthly_interest_rate,
-            installment_delay_probability=installment_delay_probability,
+            monthly_hazard=monthly_hazard,
+            monthly_miss_probability=monthly_miss_probability,
+            default_probability_over_term=default_probability_over_term,
             term_months=self.loan_term_months,
             remaining_months=self.loan_term_months,
         )
@@ -375,18 +393,20 @@ class PortfolioSimulator:
 
         return contract
 
+    @staticmethod
+    def _month_date(month: int) -> date:
+        """Map the simulated month counter to a real calendar-month checkpoint."""
+        if month < 1:
+            raise ValueError("month must be >= 1")
+        year = 2001 + (month - 1) // 12
+        month_of_year = (month - 1) % 12 + 1
+        return date(year, month_of_year, 1)
+
     def advance_month(
         self,
         capital_injection: Optional[float] = None,
     ) -> MonthlyPortfolioResult:
-        """
-        Advance one calendar month and process all cash expected in that month.
-
-        A share of every contractual installment is collected on time. The
-        delayed share is placed into future-month receivables, and every
-        delayed amount is ultimately collected. No permanent credit loss is
-        modeled in this version.
-        """
+        """Advance one monthly checkpoint and process full-or-zero installments."""
         injection = (
             self.monthly_capital_injection
             if capital_injection is None
@@ -397,25 +417,49 @@ class PortfolioSimulator:
 
         cash_before = self.cash_available
         self.month += 1
+        current_date = self._month_date(self.month)
         self.cash_available += injection
 
         principal_collected = 0.0
         interest_collected = 0.0
         delayed_payment_amount_collected = 0.0
         delayed_payment_amount_scheduled = 0.0
-        expected_delayed_installments = 0.0
+        default_count = 0.0
+        gross_defaulted_principal = 0.0
+        delayed_installment_count = 0.0
 
-        # First collect delayed installments scheduled for this calendar month.
+        # Recognize default before collecting receipts scheduled this month.
+        # The threshold is strictly more than 90 calendar days past due.
+        for contract in self.contracts:
+            if (
+                contract.missed_installment_occurred
+                and not contract.default_recognized
+                and contract.missed_due_date is not None
+                and (current_date - contract.missed_due_date).days > 90
+            ):
+                contract.default_recognized = True
+                contract.default_recognition_date = current_date
+                default_count += 1.0
+                gross_defaulted_principal += contract.missed_principal
+
+        # Collect previously missed installments when their full collection lag ends.
         overdue = self._delayed_receivables.pop(
             self.month,
-            {"principal": 0.0, "interest": 0.0},
+            {"principal": 0.0, "interest": 0.0, "items": []},
         )
-        delayed_principal = overdue.get("principal", 0.0)
-        delayed_interest = overdue.get("interest", 0.0)
+        delayed_principal = float(overdue.get("principal", 0.0))
+        delayed_interest = float(overdue.get("interest", 0.0))
+        delayed_payment_amount_collected += delayed_principal + delayed_interest
         principal_collected += delayed_principal
         interest_collected += delayed_interest
-        delayed_payment_amount_collected += delayed_principal + delayed_interest
         self.cash_available += delayed_principal + delayed_interest
+
+        for item in overdue.get("items", []):
+            contract_id = item.get("contract_id")
+            for contract in self.contracts:
+                if contract.loan_id == contract_id:
+                    contract.late_payment_collected = True
+                    break
 
         for contract in self.contracts:
             if contract.status != "active":
@@ -425,13 +469,12 @@ class PortfolioSimulator:
                 contract.status = "matured"
                 continue
 
-            # A contract originated in month t is first due in month t + 1.
+            # A loan originated in month t is first due in month t + 1.
             if contract.origin_month >= self.month:
                 continue
 
             balance = contract.outstanding_principal
             interest_due = balance * contract.monthly_interest_rate
-
             if contract.remaining_months == 1:
                 principal_due = balance
             else:
@@ -440,36 +483,51 @@ class PortfolioSimulator:
                     max(0.0, contract.monthly_payment - interest_due),
                 )
 
-            delay_probability = contract.installment_delay_probability
-            on_time_share = 1.0 - delay_probability
-            on_time_principal = principal_due * on_time_share
-            on_time_interest = interest_due * on_time_share
-            late_principal = principal_due * delay_probability
-            late_interest = interest_due * delay_probability
+            installment_amount = principal_due + interest_due
+            missed_this_installment = False
 
-            principal_collected += on_time_principal
-            interest_collected += on_time_interest
-            self.cash_available += on_time_principal + on_time_interest
+            # Each loan may have one default-causing missed installment.
+            # An individual installment is either paid in full or not at all.
+            if not contract.missed_installment_occurred:
+                missed_this_installment = (
+                    self.rng.random() < contract.monthly_miss_probability
+                )
 
-            if delay_probability > 0.0:
-                delayed_payment_amount_scheduled += late_principal + late_interest
-                expected_delayed_installments += delay_probability
-                for lag, weight in zip(self.delay_lags_months, self.delay_lag_weights):
-                    if weight <= 0.0:
-                        continue
-                    collection_month = self.month + lag
-                    bucket = self._delayed_receivables.setdefault(
-                        collection_month,
-                        {"principal": 0.0, "interest": 0.0},
-                    )
-                    bucket["principal"] += late_principal * weight
-                    bucket["interest"] += late_interest * weight
+            if missed_this_installment:
+                contract.missed_installment_occurred = True
+                contract.missed_due_date = current_date
+                contract.missed_principal = principal_due
+                contract.missed_interest = interest_due
 
-            # The contractual amortization schedule advances on its due dates.
-            # Any unpaid principal portion is tracked separately in the queue.
+                collection_month = (
+                    self.month + self.default_collection_lag_months
+                )
+                bucket = self._delayed_receivables.setdefault(
+                    collection_month,
+                    {"principal": 0.0, "interest": 0.0, "items": []},
+                )
+                bucket["principal"] = float(bucket.get("principal", 0.0)) + principal_due
+                bucket["interest"] = float(bucket.get("interest", 0.0)) + interest_due
+                bucket["items"].append({
+                    "contract_id": contract.loan_id,
+                    "principal": principal_due,
+                    "interest": interest_due,
+                    "due_date": current_date.isoformat(),
+                    "collection_date": self._month_date(collection_month).isoformat(),
+                })
+
+                delayed_payment_amount_scheduled += installment_amount
+                delayed_installment_count += 1.0
+            else:
+                # Full on-time collection; never collect a fractional installment.
+                principal_collected += principal_due
+                interest_collected += interest_due
+                self.cash_available += installment_amount
+
+            # Advance the contractual amortization schedule. A missed payment's
+            # principal remains separately represented in pending receivables.
             contract.outstanding_principal = max(0.0, balance - principal_due)
             contract.remaining_months -= 1
-
             if contract.remaining_months == 0:
                 contract.outstanding_principal = 0.0
                 contract.survival_probability = 0.0
@@ -477,20 +535,18 @@ class PortfolioSimulator:
             else:
                 contract.survival_probability = 1.0
 
-        # This scenario assumes full collection: no permanent default or recovery loss.
-        expected_default_count = 0.0
-        gross_defaulted_principal = 0.0
+        # All missed installments are collected in full; no permanent loss.
         recovery_collected = 0.0
         net_default_loss = 0.0
         financial_pnl = interest_collected
 
         self.cumulative_principal_collected += principal_collected
-        self.cumulative_expected_defaults += expected_default_count
+        self.cumulative_expected_defaults += default_count
         self.cumulative_net_default_loss += net_default_loss
         self.cumulative_interest_collected += interest_collected
         self.cumulative_delayed_payment_amount_scheduled += delayed_payment_amount_scheduled
         self.cumulative_delayed_payment_amount_collected += delayed_payment_amount_collected
-        self.cumulative_expected_delayed_installments += expected_delayed_installments
+        self.cumulative_expected_delayed_installments += delayed_installment_count
 
         return MonthlyPortfolioResult(
             month=self.month,
@@ -499,7 +555,7 @@ class PortfolioSimulator:
             principal_collected=principal_collected,
             interest_collected=interest_collected,
             recovery_collected=recovery_collected,
-            expected_default_count=expected_default_count,
+            expected_default_count=default_count,
             gross_defaulted_principal=gross_defaulted_principal,
             net_default_loss=net_default_loss,
             financial_pnl=financial_pnl,
@@ -510,5 +566,5 @@ class PortfolioSimulator:
             delayed_payment_amount_scheduled=delayed_payment_amount_scheduled,
             delayed_payment_amount_collected=delayed_payment_amount_collected,
             pending_delayed_receivables=self.pending_delayed_receivables,
-            expected_delayed_installments=expected_delayed_installments,
+            expected_delayed_installments=delayed_installment_count,
         )
