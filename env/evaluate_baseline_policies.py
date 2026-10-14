@@ -25,7 +25,10 @@ import pandas as pd
 from sklearn.preprocessing import StandardScaler
 
 from portfolio_loan_env import PortfolioLoanEnv
-from portfolio_experiment_utils import calibrate_hazard_intercept_for_population
+from portfolio_experiment_utils import (
+    calibrate_hazard_intercept_for_population,
+    load_split_and_scaler,
+)
 
 
 FEATURE_COLUMNS = [
@@ -393,6 +396,18 @@ def parse_args():
                         help="Exit instead of using synthetic data if df_cleaned.csv is not found.")
     parser.add_argument("--episodes", type=int, default=10, help="Number of matched-seed episodes per policy.")
     parser.add_argument("--seed", type=int, default=42, help="Base seed; all policies use matching episode seeds.")
+    parser.add_argument(
+        "--split",
+        choices=["full", "validation", "test"],
+        default="full",
+        help="Evaluate on all usable rows (full) or the fixed train/validation/test split.",
+    )
+    parser.add_argument(
+        "--split-seed",
+        type=int,
+        default=42,
+        help="Seed used by the same 70/10/20 split as DQN training/evaluation.",
+    )
     parser.add_argument("--initial-budget", type=float, default=1_000_000_000)
     parser.add_argument("--monthly-capital-injection", type=float, default=0.0)
     parser.add_argument("--applicants-per-month", type=int, default=None, help="Legacy fixed cohort size. When supplied alone, monthly cohort size is fixed.")
@@ -473,9 +488,31 @@ def main():
         raise ValueError("--reference-loan-amount must be finite and positive.")
 
     project_root = Path(__file__).resolve().parents[1]
-    df, scaler, data_source = load_data(args.data, args.require_real_data, project_root)
+    if args.split == "full":
+        df, scaler, data_source = load_data(
+            args.data, args.require_real_data, project_root
+        )
+        calibration_population = df
+        split_info = None
+    else:
+        # Use the identical deterministic split and training-fitted scaler as DQN.
+        # Calibration is still performed on the full usable feature population,
+        # matching train_portfolio_dqn.py; only the evaluated applicants are held out.
+        train_raw, validation_raw, test_raw, scaler, split_info = load_split_and_scaler(
+            data_path=args.data,
+            split_seed=args.split_seed,
+        )
+        df = validation_raw if args.split == "validation" else test_raw
+        calibration_population = pd.concat(
+            [train_raw, validation_raw, test_raw], ignore_index=True
+        )
+        data_source = (
+            f"real:{split_info['dataset_path']} "
+            f"(split={args.split}, split_seed={args.split_seed})"
+        )
+
     hazard_calibration = calibrate_hazard_intercept_for_population(
-        raw_df=df,
+        raw_df=calibration_population,
         target_annual_default_rate=args.target_annual_default_rate,
         reference_loan_amount=args.reference_loan_amount,
         calibration_horizon_months=12,
@@ -494,7 +531,9 @@ def main():
     print("PORTFOLIO BASELINE POLICY COMPARISON")
     print("=" * 76)
     print(f"Data source              : {data_source}")
-    print(f"Usable dataset rows      : {len(df):,}")
+    print(f"Evaluation rows          : {len(df):,}")
+    if args.split != "full":
+        print(f"Evaluation split         : {args.split} (split seed={args.split_seed})")
     print(f"Episodes per policy      : {args.episodes}")
     print(f"Initial budget           : {args.initial_budget:,.0f}")
     print(f"Applicants/month range   : {args.min_applicants_per_month}..{args.max_applicants_per_month} (uniform, inclusive)")
@@ -551,6 +590,9 @@ def main():
     config.update({
         "data_source": data_source,
         "dataset_rows": len(df),
+        "evaluation_split": args.split,
+        "split_seed": args.split_seed if args.split != "full" else None,
+        "split_info": split_info,
         "hazard_intercept": args.hazard_intercept,
         "hazard_calibration": hazard_calibration,
         "policies": list(POLICIES),
