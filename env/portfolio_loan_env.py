@@ -122,6 +122,11 @@ class PortfolioLoanEnv(gym.Env):
             or default_dpd_threshold_days < 1
         ):
             raise ValueError("default_dpd_threshold_days must be a positive integer.")
+        if default_collection_lag_months * 30 <= default_dpd_threshold_days:
+            raise ValueError(
+                "The configured collection lag must extend beyond the DPD threshold "
+                "at the monthly checkpoint cadence."
+            )
 
         if not np.isfinite(hazard_slope) or hazard_slope < 0:
             raise ValueError("hazard_slope must be finite and non-negative.")
