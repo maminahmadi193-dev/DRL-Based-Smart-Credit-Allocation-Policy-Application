@@ -592,6 +592,39 @@ class TestPortfolioLoanEnv(unittest.TestCase):
         )
         env.close()
 
+    def test_episode_waits_for_twelve_month_delayed_receipt(self):
+        env = make_env(
+            initial_budget=100_000_000,
+            applicants_per_month=1,
+            origination_months=1,
+            loan_term_months=1,
+            annual_interest_rate=0.0,
+            payment_delay_probability=1.0,
+            delay_lag_weights=(0.0, 0.0, 0.0, 1.0),
+        )
+        env.reset(seed=42)
+        env.current_customer.risk = 100.0
+
+        _, _, terminated, _, info = env.step(1)
+
+        self.assertFalse(terminated)
+        self.assertEqual(env.phase, "settlement")
+        self.assertEqual(env.portfolio.month, 2)
+        self.assertEqual(env.portfolio.active_contract_count, 0)
+        self.assertGreater(info["pending_delayed_receivables"], 0.0)
+
+        for expected_month in range(3, 15):
+            _, _, terminated, _, info = env.step(0)
+            self.assertEqual(env.portfolio.month, expected_month)
+            if expected_month < 14:
+                self.assertFalse(terminated)
+
+        self.assertTrue(terminated)
+        self.assertTrue(env.portfolio.is_fully_settled)
+        self.assertAlmostEqual(env.portfolio.pending_delayed_receivables, 0.0)
+        self.assertAlmostEqual(env.portfolio.available_budget, 100_000_000)
+        env.close()
+
     def test_gymnasium_environment_checker(self):
         env = make_env(
             applicants_per_month=2,
