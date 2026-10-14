@@ -14,23 +14,6 @@ from portfolio_experiment_utils import load_split_and_scaler, project_root
 from portfolio_loan_env import PortfolioLoanEnv
 
 
-def parse_weights(value):
-    try:
-        weights = tuple(float(part.strip()) for part in value.split(","))
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(
-            "Weights must be four comma-separated numbers for lags 1,2,3,12."
-        ) from exc
-    if len(weights) != 4 or any(not math.isfinite(x) or x < 0 for x in weights):
-        raise argparse.ArgumentTypeError(
-            "Provide four finite, non-negative weights for lags 1,2,3,12."
-        )
-    total = sum(weights)
-    if total <= 0:
-        raise argparse.ArgumentTypeError("At least one lag weight must be positive.")
-    return tuple(x / total for x in weights)
-
-
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Run one 100M loan and verify cash-flow reconciliation."
@@ -39,22 +22,15 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=123)
     parser.add_argument("--loan-term-months", type=int, choices=[12, 18, 24, 36], default=18)
     parser.add_argument("--annual-interest-rate", type=float, default=0.04)
-    parser.add_argument(
-        "--payment-delay-probability",
-        type=float,
-        default=0.10,
-        help="Maximum expected late-payment share, scaled by post-loan risk / 100.",
-    )
-    parser.add_argument(
-        "--delay-lag-weights",
-        type=parse_weights,
-        default=(0.25, 0.25, 0.25, 0.25),
-        help="Normalized weights for delay lags 1,2,3,12 months.",
-    )
+    parser.add_argument("--default-collection-lag-months", type=int, choices=range(4, 13), default=4)
+    parser.add_argument("--default-dpd-threshold-days", type=int, default=90)
+    parser.add_argument("--hazard-slope", type=float, default=0.08)
+    parser.add_argument("--hazard-center", type=float, default=60.0)
+    parser.add_argument("--max-hazard", type=float, default=0.005)
     parser.add_argument(
         "--stress-max-delay",
         action="store_true",
-        help="Use 100% maximum late share and set the test applicant risk to 100.",
+        help="Force a missed installment and collect it 12 months later.",
     )
     parser.add_argument(
         "--output",
@@ -68,8 +44,16 @@ def main():
     args = parse_args()
     if not math.isfinite(args.annual_interest_rate) or args.annual_interest_rate < 0:
         raise ValueError("--annual-interest-rate must be finite and non-negative.")
-    if not math.isfinite(args.payment_delay_probability) or not 0 <= args.payment_delay_probability <= 1:
-        raise ValueError("--payment-delay-probability must be between 0 and 1.")
+    if args.default_dpd_threshold_days < 1:
+        raise ValueError("--default-dpd-threshold-days must be >= 1.")
+    if not 4 <= args.default_collection_lag_months <= 12:
+        raise ValueError("--default-collection-lag-months must be between 4 and 12.")
+    if not math.isfinite(args.hazard_slope) or args.hazard_slope < 0:
+        raise ValueError("--hazard-slope must be finite and non-negative.")
+    if not math.isfinite(args.hazard_center):
+        raise ValueError("--hazard-center must be finite.")
+    if not math.isfinite(args.max_hazard) or args.max_hazard < 0:
+        raise ValueError("--max-hazard must be finite and non-negative.")
 
     base_dir = project_root()
     output_path = Path(args.output).expanduser()
@@ -89,7 +73,8 @@ def main():
         split_seed=42,
     )
 
-    delay_share = 1.0 if args.stress_max_delay else args.payment_delay_probability
+    collection_lag = 12 if args.stress_max_delay else args.default_collection_lag_months
+    maximum_hazard = 1_000.0 if args.stress_max_delay else args.max_hazard
     env = PortfolioLoanEnv(
         raw_df=test_raw,
         scaler=scaler,
@@ -101,8 +86,11 @@ def main():
         origination_months=1,
         loan_term_months=args.loan_term_months,
         annual_interest_rate=args.annual_interest_rate,
-        payment_delay_probability=delay_share,
-        delay_lag_weights=args.delay_lag_weights,
+        default_collection_lag_months=collection_lag,
+        default_dpd_threshold_days=args.default_dpd_threshold_days,
+        hazard_slope=args.hazard_slope,
+        hazard_center=args.hazard_center,
+        max_hazard=maximum_hazard,
         social_reward_weight=1.0,
         financial_reward_weight=1.0,
         financial_reward_scale=100_000_000,
@@ -115,7 +103,8 @@ def main():
     try:
         observation, _ = env.reset(seed=args.seed)
         if args.stress_max_delay:
-            # Test-only stress scenario: ensure the configured late share is reached.
+            # Test-only stress mode: a very high hazard forces the first
+            # scheduled installment to be missed with probability effectively 1.
             env.current_customer.risk = 100.0
 
         terminated = False
@@ -206,8 +195,8 @@ def main():
         )
 
         actual_contract = portfolio.contracts[0] if portfolio.contracts else None
-        effective_late_share = (
-            actual_contract.installment_delay_probability
+        monthly_miss_probability = (
+            actual_contract.monthly_miss_probability
             if actual_contract is not None
             else math.nan
         )
@@ -220,9 +209,11 @@ def main():
         print(f"Loan term               : {args.loan_term_months} months")
         print(f"Annual nominal rate     : {args.annual_interest_rate:.2%}")
         print(f"Monthly nominal rate    : {args.annual_interest_rate / 12:.6%}")
-        print(f"Stress max-delay mode   : {args.stress_max_delay}")
-        print(f"Effective late share    : {effective_late_share:.2%}")
-        print(f"Delay lag weights       : {args.delay_lag_weights}")
+        print(f"Forced missed-payment stress: {args.stress_max_delay}")
+        print(f"Monthly miss probability: {monthly_miss_probability:.4%}")
+        print(f"Maximum monthly hazard : {maximum_hazard:.6f}")
+        print(f"Default DPD threshold  : >{args.default_dpd_threshold_days} days")
+        print(f"Collection lag         : {collection_lag} months")
         print(f"Episode ended           : {terminated}")
         print(f"Final month             : {portfolio.month}")
         print(f"Loan principal          : {portfolio.total_disbursed:,.2f}")
