@@ -12,7 +12,8 @@ class CustomerSimulator:
         gamma = 1.0,
         hazard_slope=0.08,
         hazard_center=60,
-        max_hazard = 0.005,
+        max_hazard=0.005,
+        hazard_intercept=0.0,
         horizon_months=18,
     ):
         self.alpha = alpha
@@ -21,9 +22,12 @@ class CustomerSimulator:
 
         self.hazard_slope = hazard_slope
         self.hazard_center = hazard_center
-        self.max_hazard = max_hazard
+        self.max_hazard = float(max_hazard)
+        self.hazard_intercept = float(hazard_intercept)
+        if not np.isfinite(self.hazard_intercept):
+            raise ValueError("hazard_intercept must be finite.")
 
-        self.horizon_months = horizon_months
+        self.horizon_months = int(horizon_months)
 
     # ======================================================
     # Deterministic State Updates
@@ -221,16 +225,80 @@ class CustomerSimulator:
         
         risk = np.clip(customer.risk, 0, 100)
 
-        z = self.hazard_slope * (
-            risk - self.hazard_center
+        z = (
+            self.hazard_slope * (risk - self.hazard_center)
+            + self.hazard_intercept
         )
 
-        hazard_score = (1 / (1 + np.exp(-z)))
+        # The additive intercept calibrates the population-level default rate
+        # while preserving risk ordering and the configured hazard ceiling.
+        z = float(np.clip(z, -60.0, 60.0))
+        hazard_score = 1.0 / (1.0 + np.exp(-z))
 
         hazard = self.max_hazard * hazard_score
 
         return float(hazard)
 
+
+    @staticmethod
+    def calibrate_hazard_intercept(
+        reference_risks,
+        target_term_default_rate: float,
+        max_hazard: float,
+        hazard_slope: float,
+        hazard_center: float,
+        horizon_months: int,
+    ) -> float:
+        """
+        Find a logistic intercept so mean term PD on a reference population
+        matches the supplied target, without using individual default labels.
+
+        reference_risks must represent the post-loan risk under a stated
+        reference exposure (e.g. a hypothetical 100M loan). The returned
+        intercept is a population calibration parameter, not an estimate of
+        each applicant's observed default label.
+        """
+        risks = np.asarray(reference_risks, dtype=float).reshape(-1)
+        if risks.size == 0 or not np.all(np.isfinite(risks)):
+            raise ValueError("reference_risks must be a non-empty finite array.")
+        if not np.isfinite(target_term_default_rate) or not 0.0 < target_term_default_rate < 1.0:
+            raise ValueError("target_term_default_rate must be strictly between 0 and 1.")
+        if not np.isfinite(max_hazard) or max_hazard <= 0.0:
+            raise ValueError("max_hazard must be finite and positive for calibration.")
+        if not np.isfinite(hazard_slope) or hazard_slope < 0.0:
+            raise ValueError("hazard_slope must be finite and non-negative.")
+        if not np.isfinite(hazard_center):
+            raise ValueError("hazard_center must be finite.")
+        if int(horizon_months) <= 0:
+            raise ValueError("horizon_months must be positive.")
+
+        maximum_attainable_pd = float(-np.expm1(-max_hazard * int(horizon_months)))
+        if target_term_default_rate >= maximum_attainable_pd:
+            raise ValueError(
+                "Target term default rate must be below the maximum attainable "
+                f"PD ({maximum_attainable_pd:.6%}) for max_hazard and loan term."
+            )
+
+        linear_predictor = hazard_slope * (
+            np.clip(risks, 0.0, 100.0) - hazard_center
+        )
+
+        def mean_term_pd(intercept: float) -> float:
+            z = np.clip(linear_predictor + intercept, -60.0, 60.0)
+            sigmoid = 1.0 / (1.0 + np.exp(-z))
+            hazards = max_hazard * sigmoid
+            term_pds = -np.expm1(-hazards * int(horizon_months))
+            return float(np.mean(term_pds))
+
+        low, high = -60.0, 60.0
+        for _ in range(100):
+            midpoint = (low + high) / 2.0
+            if mean_term_pd(midpoint) < target_term_default_rate:
+                low = midpoint
+            else:
+                high = midpoint
+
+        return float((low + high) / 2.0)
 
     def _calculate_monthly_event_probability(
         self,
