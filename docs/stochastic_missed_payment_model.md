@@ -6,27 +6,33 @@ The portfolio simulator models a loan as a sequence of monthly installment due d
 
 This is a deliberately limited, reproducible experiment model. It does not yet estimate risk parameters from observed repayment histories.
 
-## Risk model
+## Risk model and population calibration
 
-After a loan is approved, the existing customer-risk update is applied. The resulting risk score is mapped to a monthly hazard:
+After a loan is approved, the current customer-state and risk update is applied. The updated risk score is mapped to a monthly hazard with a logistic curve and a calibratable intercept:
 
-`h = max_hazard * sigmoid(hazard_slope * (risk - hazard_center))`
+`h_i = max_hazard * sigmoid(hazard_slope * (risk_i - hazard_center) + hazard_intercept)`
 
-where `sigmoid(x) = 1 / (1 + exp(-x))`.
+where `sigmoid(x) = 1 / (1 + exp(-x))`. The additive intercept changes the population-level level of risk while preserving the monotonic ordering of customers by risk. The hazard is bounded above by `max_hazard`.
 
-The event probability for a single installment month is:
+The probability of a missed installment at a monthly checkpoint is:
 
-`q = 1 - exp(-h)`
+`q_i = 1 - exp(-h_i)`
 
-and the probability of at least one missed installment during a loan term of `T` months is:
+and the probability of at least one missed installment during a contractual term of `T` months is:
 
-`PD(T) = 1 - exp(-h * T) = 1 - (1 - q)^T`.
+`PD_i(T) = 1 - exp(-h_i * T) = 1 - (1 - q_i)^T`.
 
-The term-specific PD is stored on each loan contract. Actual payments use a seeded random draw with probability `q`; this is not an expected-value split of cash flows. Here, term PD means the probability that an installment due within the contractual term is missed and eventually crosses the DPD threshold. For a missed final installment, default recognition can occur after contractual maturity during the settlement tail.
+### Current operational calibration
 
-The environment's next-month expected-collections feature remains an expectation used for decision-making and forecasting. It can represent a probability-weighted expected value, but it is **not booked as a realized receipt**: actual cash collections are recorded only when the full installment is paid or when the full overdue installment is later collected.
+The current experiment operationalizes the bank-provided 1.3% benchmark as the **mean cumulative probability of a loan reaching the specified 90+ DPD default definition over its full contractual term**, under a reference exposure. By default, the reference exposure is a hypothetical 100M loan and the contractual term is the chosen experiment term (18 months by default). Calibration computes each row's *post-loan* risk under that reference amount, then solves for `hazard_intercept` such that the average term PD across the reference population is 1.3%.
 
-## Missed installment and default recognition
+This calibration does **not** need individual default labels and does not manufacture a label for any row. It matches the mean model-implied probability, not the realized count in every episode. Realized default rates will vary randomly, and a different action mix or loan amount can move the portfolio rate away from 1.3%; that is intended, because the policy should be allowed to change the risk profile of the loans it chooses.
+
+The 100M reference amount is a modeling convention (it matches the smallest positive action), not something implied by the benchmark. The curve slope and maximum hazard also remain structural assumptions; calibration of the intercept alone does not validate the risk ranking or prove applicant-level PD accuracy.
+
+**Important rate-definition caveat:** a 1.3% point-in-time share of bank accounts or outstanding balance currently classified as 90+ DPD is not mathematically the same as a 1.3% cumulative probability of default over a 12-, 18-, 24-, or 36-month loan term. The implementation uses the latter interpretation so the experiment is operational. Before treating this as an empirical calibration, verify that the bank's 1.3% denominator, measurement period, and exposure basis are compatible with a cumulative loan-level rate. If the reported figure is a point-in-time prevalence, we need another assumption or portfolio/vintage data to translate it to a term PD.
+
+## ## Missed installment and default recognition
 
 The current simplified contract behavior allows at most one missed installment per loan. If one installment is missed:
 
@@ -47,7 +53,7 @@ Calendar checkpoints are currently represented by the first day of each simulate
 - Only the first missed installment is simulated for each loan; all later installments are assumed on time. This is a simplification, not a claim about real customer behavior.
 - The contractual amortization schedule continues after a missed installment. Its overdue principal-and-interest amount is tracked separately until collected.
 - The default definition uses 90+ days past due, while local past-due / overdue / doubtful classifications are separate concepts and are not implemented as status tiers here.
-- The risk-to-hazard mapping and its parameters are illustrative and not empirically calibrated. The model should not be described as having predictive PD until the mapping is calibrated and validated against historical DPD/default labels.
+- The logistic hazard intercept is calibrated to a population-level 1.3% reference term PD using customer features only. The slope, hazard ceiling, post-loan risk relationship, and interpretation of the 1.3% benchmark remain assumptions; this is not applicant-level predictive validation.
 - Interest accrues only through the currently specified contractual schedule; the delayed installment is not assessed additional penalty interest in this version.
 
 ## Configuration
@@ -57,6 +63,8 @@ The default settings are exposed by the training, baseline, and trace scripts:
 - `--loan-term-months`: 12, 18, 24, or 36 months; one term per experiment.
 - `--annual-interest-rate`: nominal annual rate, 4% by default.
 - `--max-hazard`: maximum monthly hazard, 0.005 by default.
+- `--target-term-default-rate`: calibrated mean cumulative reference term PD, 0.013 by default.
+- `--reference-loan-amount`: exposure defining the calibration population, 100M by default.
 - `--default-dpd-threshold-days`: 90 by default; recognition uses strictly greater than this threshold.
 - `--default-collection-lag-months`: 4 by default, with 12 for the stress scenario.
 
@@ -70,4 +78,4 @@ python env/trace_portfolio_cashflows.py --data "C:\path\to\df_cleaned.csv" --str
 python env/train_portfolio_dqn.py --data "C:\path\to\df_cleaned.csv" --run-name portfolio_dqn_stochastic_payments_smoke --timesteps 5000 --seed 42
 ```
 
-Models trained before environment model version 2 used the old fractional-delay observation/reward dynamics and must be retrained before comparison under this model.
+Models trained before environment model version 3 do not include the population-calibrated hazard intercept and must be retrained before comparison under these dynamics.
