@@ -151,10 +151,13 @@ class PortfolioLoanEnv(gym.Env):
         self.payment_delay_probability = float(payment_delay_probability)
         self.delay_lag_weights = tuple(float(weight) for weight in delay_lag_weights)
         self.delay_model_enabled = self.payment_delay_probability > 0.0
+        # The next-month onward delayed-receipt schedule is part of the
+        # observation so that the cash-flow process remains observable.
+        self.delay_observation_horizon = 12
         self.PORTFOLIO_FEATURE_COUNT = (
             type(self).PORTFOLIO_FEATURE_COUNT
             + int(self.random_monthly_cohorts)
-            + int(self.delay_model_enabled)
+            + (self.delay_observation_horizon if self.delay_model_enabled else 0)
         )
         self.origination_months = int(origination_months)
         self.loan_term_months = int(loan_term_months)
@@ -469,8 +472,9 @@ class PortfolioLoanEnv(gym.Env):
         ])
 
         if self.delay_model_enabled:
-            portfolio_values.append(
-                self.portfolio.pending_delayed_receivables / budget_scale
+            portfolio_values.extend(
+                amount / budget_scale
+                for amount in self.portfolio.delayed_receipts_by_month_ahead
             )
 
         portfolio_features = np.array(
