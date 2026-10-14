@@ -25,6 +25,7 @@ import pandas as pd
 from sklearn.preprocessing import StandardScaler
 
 from portfolio_loan_env import PortfolioLoanEnv
+from portfolio_experiment_utils import calibrate_hazard_intercept_for_population
 
 
 FEATURE_COLUMNS = [
@@ -84,6 +85,8 @@ METRICS = (
     "net_default_loss",
     "expected_default_count",
     "recognized_default_count",
+    "realized_default_rate",
+    "mean_contract_term_pd",
     "missed_installment_count",
     "delayed_payment_amount_scheduled",
     "delayed_payment_amount_collected",
@@ -256,6 +259,7 @@ def evaluate_one_episode(policy: str, episode: int, seed: int, df: pd.DataFrame,
         hazard_slope=args.hazard_slope,
         hazard_center=args.hazard_center,
         max_hazard=args.max_hazard,
+        hazard_intercept=args.hazard_intercept,
         social_reward_weight=args.social_reward_weight,
         financial_reward_weight=args.financial_reward_weight,
         financial_reward_scale=args.financial_reward_scale,
@@ -320,6 +324,14 @@ def evaluate_one_episode(policy: str, episode: int, seed: int, df: pd.DataFrame,
         "net_default_loss": float(portfolio.cumulative_net_default_loss),
         "expected_default_count": float(portfolio.cumulative_expected_defaults),
         "recognized_default_count": float(portfolio.cumulative_recognized_defaults),
+        "realized_default_rate": (
+            float(portfolio.cumulative_recognized_defaults / loans_granted)
+            if loans_granted else 0.0
+        ),
+        "mean_contract_term_pd": (
+            float(np.mean([contract.default_probability_over_term for contract in portfolio.contracts]))
+            if portfolio.contracts else 0.0
+        ),
         "missed_installment_count": float(portfolio.cumulative_missed_installments),
         "delayed_payment_amount_scheduled": float(portfolio.cumulative_delayed_payment_amount_scheduled),
         "delayed_payment_amount_collected": float(portfolio.cumulative_delayed_payment_amount_collected),
@@ -375,6 +387,8 @@ def parse_args():
     parser.add_argument("--hazard-slope", type=float, default=0.08)
     parser.add_argument("--hazard-center", type=float, default=60.0)
     parser.add_argument("--max-hazard", type=float, default=0.005)
+    parser.add_argument("--target-term-default-rate", type=float, default=0.013)
+    parser.add_argument("--reference-loan-amount", type=float, default=100_000_000)
     parser.add_argument("--social-reward-weight", type=float, default=1.0)
     parser.add_argument(
         "--scale-access-rewards-by-coverage",
@@ -426,11 +440,31 @@ def main():
         raise ValueError("--hazard-slope must be finite and non-negative")
     if not np.isfinite(args.hazard_center):
         raise ValueError("--hazard-center must be finite")
-    if not np.isfinite(args.max_hazard) or args.max_hazard < 0:
-        raise ValueError("--max-hazard must be finite and non-negative")
+    if not np.isfinite(args.max_hazard) or args.max_hazard <= 0:
+        raise ValueError("--max-hazard must be finite and positive for calibration.")
+    if not np.isfinite(args.target_term_default_rate) or not 0 < args.target_term_default_rate < 1:
+        raise ValueError("--target-term-default-rate must be between 0 and 1.")
+    max_attainable_pd = -np.expm1(-args.max_hazard * args.loan_term_months)
+    if args.target_term_default_rate >= max_attainable_pd:
+        raise ValueError(
+            "--target-term-default-rate must be below maximum attainable term PD "
+            f"({max_attainable_pd:.6%})."
+        )
+    if not np.isfinite(args.reference_loan_amount) or args.reference_loan_amount <= 0:
+        raise ValueError("--reference-loan-amount must be finite and positive.")
 
     project_root = Path(__file__).resolve().parents[1]
     df, scaler, data_source = load_data(args.data, args.require_real_data, project_root)
+    hazard_calibration = calibrate_hazard_intercept_for_population(
+        raw_df=df,
+        target_term_default_rate=args.target_term_default_rate,
+        reference_loan_amount=args.reference_loan_amount,
+        loan_term_months=args.loan_term_months,
+        max_hazard=args.max_hazard,
+        hazard_slope=args.hazard_slope,
+        hazard_center=args.hazard_center,
+    )
+    args.hazard_intercept = float(hazard_calibration["hazard_intercept"])
 
     output_dir = Path(args.output_dir) if args.output_dir else project_root / "models" / "results"
     if not output_dir.is_absolute():
@@ -450,6 +484,10 @@ def main():
     print(f"Annual nominal rate       : {args.annual_interest_rate:.2%}")
     print(f"Monthly rate (derived)    : {args.annual_interest_rate / 12.0:.6%}")
     print(f"Maximum monthly hazard   : {args.max_hazard:.6f}")
+    print(f"Target term default rate : {args.target_term_default_rate:.4%}")
+    print(f"Reference loan amount    : {args.reference_loan_amount:,.0f}")
+    print(f"Calibrated reference PD  : {hazard_calibration['calibrated_reference_term_default_rate']:.4%}")
+    print(f"Calibrated hazard int.   : {args.hazard_intercept:.8f}")
     print(f"Default threshold        : >{args.default_dpd_threshold_days} days past due")
     print(f"Missed-payment collection: {args.default_collection_lag_months} months after due date")
     print("Payment behavior         : complete installment paid or missed")
@@ -494,6 +532,8 @@ def main():
     config.update({
         "data_source": data_source,
         "dataset_rows": len(df),
+        "hazard_intercept": args.hazard_intercept,
+        "hazard_calibration": hazard_calibration,
         "policies": list(POLICIES),
         "metric_definitions": {
             "total_reward": "Sum of the environment rewards, including scaled financial reward.",
