@@ -9,6 +9,7 @@ from gymnasium.utils.env_checker import check_env
 
 from customer_state import CustomerState
 from portfolio_loan_env import PortfolioLoanEnv
+from portfolio_experiment_utils import calibrate_hazard_intercept_for_population
 
 
 FEATURE_COLUMNS = [
@@ -120,6 +121,26 @@ def make_env(**overrides):
 
 
 class TestPortfolioLoanEnv(unittest.TestCase):
+
+    def test_population_calibration_matches_target_for_reference_loan(self):
+        df, _ = make_dataset(n=101)
+        calibration = calibrate_hazard_intercept_for_population(
+            raw_df=df,
+            target_term_default_rate=0.013,
+            reference_loan_amount=100_000_000,
+            loan_term_months=18,
+            max_hazard=0.005,
+            hazard_slope=0.08,
+            hazard_center=60.0,
+        )
+
+        self.assertAlmostEqual(
+            calibration["calibrated_reference_term_default_rate"],
+            0.013,
+            places=12,
+        )
+        self.assertEqual(calibration["reference_population_rows"], len(df))
+        self.assertEqual(calibration["calibration_loan_term_months"], 18)
 
     def test_reset_returns_valid_observation(self):
         env = make_env()
