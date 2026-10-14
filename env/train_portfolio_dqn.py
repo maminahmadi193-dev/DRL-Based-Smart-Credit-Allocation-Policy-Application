@@ -78,7 +78,7 @@ def parse_args():
         default=0.005,
         help="Maximum monthly hazard; the population rate is calibrated through a logistic intercept.",
     )
-    parser.add_argument("--target-term-default-rate", type=float, default=0.013, help="Target cumulative 90+ DPD default probability over the loan term for reference exposure (default: 1.3%).")
+    parser.add_argument("--target-annual-default-rate", type=float, default=0.013, help="Target annual 90+ DPD default probability over 12 months for reference exposure (default: 1.3%).")
     parser.add_argument("--reference-loan-amount", type=float, default=100_000_000, help="Reference loan amount for population calibration.")
     parser.add_argument("--social-reward-weight", type=float, default=1.0)
     parser.add_argument("--financial-reward-weight", type=float, default=1.0)
@@ -129,12 +129,12 @@ def main():
         raise ValueError("--hazard-center must be finite")
     if not math.isfinite(args.max_hazard) or args.max_hazard <= 0:
         raise ValueError("--max-hazard must be finite and positive for calibration.")
-    if not math.isfinite(args.target_term_default_rate) or not 0 < args.target_term_default_rate < 1:
-        raise ValueError("--target-term-default-rate must be between 0 and 1.")
-    max_attainable_pd = -math.expm1(-args.max_hazard * args.loan_term_months)
-    if args.target_term_default_rate >= max_attainable_pd:
+    if not math.isfinite(args.target_annual_default_rate) or not 0 < args.target_annual_default_rate < 1:
+        raise ValueError("--target-annual-default-rate must be between 0 and 1.")
+    max_attainable_pd = -math.expm1(-args.max_hazard * 12)
+    if args.target_annual_default_rate >= max_attainable_pd:
         raise ValueError(
-            "--target-term-default-rate must be below the maximum term PD "
+            "--target-annual-default-rate must be below the maximum annual PD "
             f"({max_attainable_pd:.6%}) allowed by max-hazard and loan term."
         )
     if not math.isfinite(args.reference_loan_amount) or args.reference_loan_amount <= 0:
@@ -177,9 +177,9 @@ def main():
     )
     hazard_calibration = calibrate_hazard_intercept_for_population(
         raw_df=calibration_population,
-        target_term_default_rate=args.target_term_default_rate,
+        target_annual_default_rate=args.target_annual_default_rate,
         reference_loan_amount=args.reference_loan_amount,
-        loan_term_months=args.loan_term_months,
+        calibration_horizon_months=12,
         max_hazard=args.max_hazard,
         hazard_slope=args.hazard_slope,
         hazard_center=args.hazard_center,
@@ -257,9 +257,9 @@ def main():
     print(f"Annual nominal rate    : {args.annual_interest_rate:.2%}")
     print(f"Monthly rate (derived) : {args.annual_interest_rate / 12.0:.6%}")
     print(f"Monthly hazard maximum : {args.max_hazard:.6f}")
-    print(f"Target term default rate: {args.target_term_default_rate:.4%}")
+    print(f"Target annual default rate: {args.target_annual_default_rate:.4%}")
     print(f"Reference loan amount  : {args.reference_loan_amount:,.0f}")
-    print(f"Calibrated term PD     : {hazard_calibration['calibrated_reference_term_default_rate']:.4%}")
+    print(f"Calibrated annual PD     : {hazard_calibration['calibrated_reference_annual_default_rate']:.4%}")
     print(f"Calibrated hazard int. : {hazard_intercept:.8f}")
     print(f"DPD default threshold  : >{args.default_dpd_threshold_days} days")
     print(f"Missed-payment collect : {args.default_collection_lag_months} months after due date")
