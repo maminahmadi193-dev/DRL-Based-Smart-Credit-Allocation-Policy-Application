@@ -18,7 +18,7 @@ class PortfolioLoanEnv(gym.Env):
     After each monthly cohort is processed:
       1. Advance the portfolio by one month.
       2. Collect expected repayments.
-      3. Account for interest and credit losses.
+      3. Account for collected interest and delayed receivables.
       4. Start the next cohort, or enter settlement.
 
     Once the origination horizon ends, remaining contracts
