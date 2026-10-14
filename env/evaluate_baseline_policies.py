@@ -249,7 +249,6 @@ def evaluate_one_episode(policy: str, episode: int, seed: int, df: pd.DataFrame,
         origination_months=args.origination_months,
         loan_term_months=args.loan_term_months,
         annual_interest_rate=args.annual_interest_rate,
-        recovery_rate=args.recovery_rate,
         payment_delay_probability=args.payment_delay_probability,
         delay_lag_weights=args.delay_lag_weights,
         social_reward_weight=args.social_reward_weight,
@@ -392,7 +391,6 @@ def parse_args():
         default=(0.25, 0.25, 0.25, 0.25),
         help="Weights for late collections after 1, 2, 3, and 12 months; normalized internally.",
     )
-    parser.add_argument("--recovery-rate", type=float, default=0.0, help=argparse.SUPPRESS)
     parser.add_argument("--social-reward-weight", type=float, default=1.0)
     parser.add_argument(
         "--scale-access-rewards-by-coverage",
@@ -434,8 +432,6 @@ def main():
         raise ValueError("--min-applicants-per-month must be >= 1")
     if args.max_applicants_per_month < args.min_applicants_per_month:
         raise ValueError("--max-applicants-per-month must be >= min-applicants-per-month")
-    if not 0.0 <= args.recovery_rate <= 1.0:
-        raise ValueError("--recovery-rate must be between 0 and 1")
     if not np.isfinite(args.annual_interest_rate) or args.annual_interest_rate < 0:
         raise ValueError("--annual-interest-rate must be finite and non-negative")
 
