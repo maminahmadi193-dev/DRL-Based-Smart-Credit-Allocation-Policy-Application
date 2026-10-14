@@ -56,6 +56,7 @@ class PortfolioLoanEnv(gym.Env):
         origination_months=12,
         loan_term_months=18,
         annual_interest_rate=0.04,
+        recovery_rate=0.0,  # Deprecated compatibility argument; must remain zero.
         payment_delay_probability=0.10,
         delay_lag_weights=(0.25, 0.25, 0.25, 0.25),
         social_reward_weight=1.0,
@@ -100,6 +101,11 @@ class PortfolioLoanEnv(gym.Env):
 
         if not np.isfinite(annual_interest_rate) or annual_interest_rate < 0:
             raise ValueError("annual_interest_rate must be finite and non-negative.")
+        if recovery_rate != 0.0:
+            raise ValueError(
+                "recovery_rate is deprecated and incompatible with the "
+                "full-collection scenario; use payment_delay_probability."
+            )
         if not np.isfinite(payment_delay_probability) or not 0.0 <= payment_delay_probability <= 1.0:
             raise ValueError("payment_delay_probability must be between 0 and 1.")
         if len(delay_lag_weights) != 4:
