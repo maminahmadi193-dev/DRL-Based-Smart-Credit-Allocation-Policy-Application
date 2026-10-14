@@ -56,7 +56,6 @@ class PortfolioLoanEnv(gym.Env):
         origination_months=12,
         loan_term_months=18,
         annual_interest_rate=0.04,
-        recovery_rate=0.0,
         payment_delay_probability=0.10,
         delay_lag_weights=(0.25, 0.25, 0.25, 0.25),
         social_reward_weight=1.0,
@@ -103,11 +102,6 @@ class PortfolioLoanEnv(gym.Env):
             raise ValueError("annual_interest_rate must be finite and non-negative.")
         if not np.isfinite(payment_delay_probability) or not 0.0 <= payment_delay_probability <= 1.0:
             raise ValueError("payment_delay_probability must be between 0 and 1.")
-        if recovery_rate != 0.0:
-            raise ValueError(
-                "recovery_rate is not used in the full-repayment delay model; "
-                "set it to 0 and configure payment_delay_probability instead."
-            )
         if len(delay_lag_weights) != 4:
             raise ValueError("delay_lag_weights must have four weights for lags 1, 2, 3, and 12 months.")
         if any(not np.isfinite(weight) or float(weight) < 0.0 for weight in delay_lag_weights):
@@ -166,7 +160,6 @@ class PortfolioLoanEnv(gym.Env):
         # amortization engine operates on a monthly rate.
         self.annual_interest_rate = float(annual_interest_rate)
         self.monthly_interest_rate = self.annual_interest_rate / 12.0
-        self.recovery_rate = float(recovery_rate)
 
         self.social_reward_weight = float(
             social_reward_weight
@@ -523,7 +516,6 @@ class PortfolioLoanEnv(gym.Env):
             ),
             loan_term_months=self.loan_term_months,
             monthly_interest_rate=self.monthly_interest_rate,
-            recovery_rate=self.recovery_rate,
             payment_delay_probability=self.payment_delay_probability,
             delay_lag_weights=self.delay_lag_weights,
         )
