@@ -512,6 +512,7 @@ class TestPortfolioLoanEnv(unittest.TestCase):
             (CustomerState.FEATURE_COUNT + env.PORTFOLIO_FEATURE_COUNT,),
         )
         self.assertTrue(env.observation_space.contains(observation))
+        check_env(env, skip_render_check=True)
 
         # The last 12 entries of the portfolio feature block describe
         # expected receipts due 1..12 months from now; a new episode is empty.
