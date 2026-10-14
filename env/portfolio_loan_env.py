@@ -26,8 +26,9 @@ class PortfolioLoanEnv(gym.Env):
     are serviced until they mature or become depleted.
 
     Important:
-    - Payment timing and collections are modeled in expectation.
-    - This scenario assumes all contractual amounts are ultimately collected.
+    - Contractual installments are realized as full on-time payments or full misses.
+    - Next-month collection forecasts are probability-weighted expectations only.
+    - This scenario assumes all missed contractual amounts are ultimately collected.
     - During settlement, actions are ignored.
     """
 
