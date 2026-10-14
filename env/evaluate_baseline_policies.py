@@ -83,6 +83,7 @@ METRICS = (
     "interest_collected",
     "net_default_loss",
     "expected_default_count",
+    "recognized_default_count",
     "delayed_payment_amount_scheduled",
     "delayed_payment_amount_collected",
     "pending_delayed_receivables",
@@ -249,8 +250,11 @@ def evaluate_one_episode(policy: str, episode: int, seed: int, df: pd.DataFrame,
         origination_months=args.origination_months,
         loan_term_months=args.loan_term_months,
         annual_interest_rate=args.annual_interest_rate,
-        payment_delay_probability=args.payment_delay_probability,
-        delay_lag_weights=args.delay_lag_weights,
+        default_collection_lag_months=args.default_collection_lag_months,
+        default_dpd_threshold_days=args.default_dpd_threshold_days,
+        hazard_slope=args.hazard_slope,
+        hazard_center=args.hazard_center,
+        max_hazard=args.max_hazard,
         social_reward_weight=args.social_reward_weight,
         financial_reward_weight=args.financial_reward_weight,
         financial_reward_scale=args.financial_reward_scale,
@@ -314,6 +318,7 @@ def evaluate_one_episode(policy: str, episode: int, seed: int, df: pd.DataFrame,
         "interest_collected": float(portfolio.cumulative_interest_collected),
         "net_default_loss": float(portfolio.cumulative_net_default_loss),
         "expected_default_count": float(portfolio.cumulative_expected_defaults),
+        "recognized_default_count": float(portfolio.cumulative_expected_defaults),
         "delayed_payment_amount_scheduled": float(portfolio.cumulative_delayed_payment_amount_scheduled),
         "delayed_payment_amount_collected": float(portfolio.cumulative_delayed_payment_amount_collected),
         "pending_delayed_receivables": float(portfolio.pending_delayed_receivables),
@@ -346,23 +351,6 @@ def summarize(episodes_df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def parse_delay_lag_weights(value):
-    try:
-        weights = tuple(float(part.strip()) for part in value.split(","))
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(
-            "Delay lag weights must be comma-separated numbers."
-        ) from exc
-    if len(weights) != 4 or any(not np.isfinite(weight) or weight < 0 for weight in weights):
-        raise argparse.ArgumentTypeError(
-            "Provide four finite, non-negative weights for delays of 1, 2, 3, and 12 months."
-        )
-    total = sum(weights)
-    if total <= 0:
-        raise argparse.ArgumentTypeError("At least one delay lag weight must be positive.")
-    return tuple(weight / total for weight in weights)
-
-
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Compare four simple baseline policies using PortfolioLoanEnv."
@@ -380,18 +368,11 @@ def parse_args():
     parser.add_argument("--origination-months", type=int, default=12)
     parser.add_argument("--loan-term-months", type=int, choices=[12, 18, 24, 36], default=18)
     parser.add_argument("--annual-interest-rate", type=float, default=0.04, help="Nominal annual interest rate; converted to monthly rate internally.")
-    parser.add_argument(
-        "--payment-delay-probability",
-        type=float,
-        default=0.10,
-        help="Illustrative maximum expected late share; scaled by post-loan customer risk score / 100 (not empirically calibrated).",
-    )
-    parser.add_argument(
-        "--delay-lag-weights",
-        type=parse_delay_lag_weights,
-        default=(0.25, 0.25, 0.25, 0.25),
-        help="Weights for late collections after 1, 2, 3, and 12 months; normalized internally.",
-    )
+    parser.add_argument("--default-collection-lag-months", type=int, choices=range(4, 13), default=4)
+    parser.add_argument("--default-dpd-threshold-days", type=int, default=90)
+    parser.add_argument("--hazard-slope", type=float, default=0.08)
+    parser.add_argument("--hazard-center", type=float, default=60.0)
+    parser.add_argument("--max-hazard", type=float, default=0.005)
     parser.add_argument("--social-reward-weight", type=float, default=1.0)
     parser.add_argument(
         "--scale-access-rewards-by-coverage",
@@ -435,6 +416,16 @@ def main():
         raise ValueError("--max-applicants-per-month must be >= min-applicants-per-month")
     if not np.isfinite(args.annual_interest_rate) or args.annual_interest_rate < 0:
         raise ValueError("--annual-interest-rate must be finite and non-negative")
+    if not 4 <= args.default_collection_lag_months <= 12:
+        raise ValueError("--default-collection-lag-months must be between 4 and 12")
+    if args.default_dpd_threshold_days < 1:
+        raise ValueError("--default-dpd-threshold-days must be >= 1")
+    if not np.isfinite(args.hazard_slope) or args.hazard_slope < 0:
+        raise ValueError("--hazard-slope must be finite and non-negative")
+    if not np.isfinite(args.hazard_center):
+        raise ValueError("--hazard-center must be finite")
+    if not np.isfinite(args.max_hazard) or args.max_hazard < 0:
+        raise ValueError("--max-hazard must be finite and non-negative")
 
     project_root = Path(__file__).resolve().parents[1]
     df, scaler, data_source = load_data(args.data, args.require_real_data, project_root)
@@ -456,17 +447,19 @@ def main():
     print(f"Loan term (months)       : {args.loan_term_months}")
     print(f"Annual nominal rate       : {args.annual_interest_rate:.2%}")
     print(f"Monthly rate (derived)    : {args.annual_interest_rate / 12.0:.6%}")
-    print(f"Max late-payment share     : {args.payment_delay_probability:.1%} (risk-scaled; illustrative)")
-    print(f"Delay lag weights         : {args.delay_lag_weights}")
-    print("Permanent credit loss      : disabled (all delayed installments are eventually collected)")
+    print(f"Maximum monthly hazard   : {args.max_hazard:.6f}")
+    print(f"Default threshold        : >{args.default_dpd_threshold_days} days past due")
+    print(f"Missed-payment collection: {args.default_collection_lag_months} months after due date")
+    print("Payment behavior         : complete installment paid or missed")
+    print("Permanent credit loss    : disabled (missed installments are eventually collected in full)")
     print(f"Social reward weight     : {args.social_reward_weight}")
     print(
         "Reward design            : "
         + ("amount-sensitive access rewards" if args.scale_access_rewards_by_coverage else "legacy access rewards")
     )
     print(f"Financial reward weight  : {args.financial_reward_weight}")
-    if args.annual_interest_rate == 0.0 and args.payment_delay_probability == 0.0:
-        print("NOTE: Interest and payment delays are both disabled for this run.")
+    if args.annual_interest_rate == 0.0 and args.max_hazard == 0.0:
+        print("NOTE: Interest and missed-installment events are both disabled for this run.")
     if data_source == "synthetic_demo_data":
         print("NOTE: Results use synthetic data, not the real cleaned dataset.")
     print("-" * 76)
