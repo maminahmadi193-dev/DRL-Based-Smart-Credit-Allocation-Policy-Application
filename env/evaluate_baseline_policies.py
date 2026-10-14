@@ -86,7 +86,7 @@ METRICS = (
     "expected_default_count",
     "recognized_default_count",
     "realized_default_rate",
-    "mean_contract_term_pd",
+    "contract_term_pd",
     "missed_installment_count",
     "delayed_payment_amount_scheduled",
     "delayed_payment_amount_collected",
@@ -328,7 +328,7 @@ def evaluate_one_episode(policy: str, episode: int, seed: int, df: pd.DataFrame,
             float(portfolio.cumulative_recognized_defaults / loans_granted)
             if loans_granted else 0.0
         ),
-        "mean_contract_term_pd": (
+        "contract_term_pd": (
             float(np.mean([contract.default_probability_over_term for contract in portfolio.contracts]))
             if portfolio.contracts else 0.0
         ),
