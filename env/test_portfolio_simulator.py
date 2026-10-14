@@ -249,6 +249,55 @@ class TestPortfolioSimulator(unittest.TestCase):
             1.0 - np.exp(-high.monthly_hazard * high.term_months),
         )
 
+    def test_term_default_probability_matches_monthly_probability(self):
+        simulator = CustomerSimulator(max_hazard=0.005)
+        hazard = 0.002
+        monthly_probability = simulator._calculate_monthly_event_probability(hazard)
+
+        self.assertAlmostEqual(monthly_probability, 1.0 - np.exp(-hazard))
+        previous_pd = 0.0
+        for term in (12, 18, 24, 36):
+            pd_over_term = simulator._calculate_default_probability(
+                hazard,
+                horizon_months=term,
+            )
+            self.assertAlmostEqual(
+                pd_over_term,
+                1.0 - (1.0 - monthly_probability) ** term,
+                places=12,
+            )
+            self.assertGreater(pd_over_term, previous_pd)
+            previous_pd = pd_over_term
+
+        self.assertEqual(simulator._calculate_monthly_event_probability(0.0), 0.0)
+        self.assertEqual(
+            simulator._calculate_default_probability(0.0, horizon_months=36),
+            0.0,
+        )
+
+    def test_payment_rng_makes_missed_installment_path_reproducible(self):
+        outcomes = []
+        for seed in (987, 987):
+            portfolio = make_portfolio(
+                budget=1_000_000,
+                term=2,
+                max_hazard=1000.0,
+                seed=seed,
+            )
+            portfolio.advance_month()
+            contract = portfolio.grant_loan(make_customer(), 200_000, customer_id=1)
+            result = portfolio.advance_month()
+            outcomes.append((
+                contract.missed_installment_occurred,
+                result.principal_collected,
+                result.delayed_payment_amount_scheduled,
+            ))
+
+        self.assertEqual(outcomes[0], outcomes[1])
+        self.assertTrue(outcomes[0][0])
+        self.assertEqual(outcomes[0][1], 0.0)
+        self.assertAlmostEqual(outcomes[0][2], 100_000.0)
+
     def test_recovery_rate_is_rejected_when_full_collection_is_assumed(self):
         with self.assertRaises(ValueError):
             PortfolioSimulator(
