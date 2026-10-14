@@ -187,13 +187,15 @@ class PortfolioSimulator:
         self.contracts: list[LoanContract] = []
 
         self.total_disbursed = 0.0
-        self.cumulative_expected_defaults = 0.0
+        self.cumulative_expected_defaults = 0.0  # Compatibility alias for old reports.
+        self.cumulative_recognized_defaults = 0.0
         self.cumulative_net_default_loss = 0.0
         self.cumulative_principal_collected = 0.0
         self.cumulative_interest_collected = 0.0
         self.cumulative_delayed_payment_amount_scheduled = 0.0
         self.cumulative_delayed_payment_amount_collected = 0.0
-        self.cumulative_expected_delayed_installments = 0.0
+        self.cumulative_expected_delayed_installments = 0.0  # Compatibility alias.
+        self.cumulative_missed_installments = 0.0
 
     @property
     def available_budget(self) -> float:
@@ -554,11 +556,13 @@ class PortfolioSimulator:
 
         self.cumulative_principal_collected += principal_collected
         self.cumulative_expected_defaults += default_count
+        self.cumulative_recognized_defaults += default_count
         self.cumulative_net_default_loss += net_default_loss
         self.cumulative_interest_collected += interest_collected
         self.cumulative_delayed_payment_amount_scheduled += delayed_payment_amount_scheduled
         self.cumulative_delayed_payment_amount_collected += delayed_payment_amount_collected
         self.cumulative_expected_delayed_installments += delayed_installment_count
+        self.cumulative_missed_installments += delayed_installment_count
 
         return MonthlyPortfolioResult(
             month=self.month,
