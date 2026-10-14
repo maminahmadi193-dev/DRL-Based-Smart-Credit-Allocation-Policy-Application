@@ -13,10 +13,15 @@ import json
 import math
 from pathlib import Path
 
+import pandas as pd
 from stable_baselines3 import DQN
 from stable_baselines3.common.callbacks import CheckpointCallback
 
-from portfolio_experiment_utils import load_split_and_scaler, project_root
+from portfolio_experiment_utils import (
+    calibrate_hazard_intercept_for_population,
+    load_split_and_scaler,
+    project_root,
+)
 from portfolio_loan_env import PortfolioLoanEnv
 
 
@@ -73,6 +78,8 @@ def parse_args():
         default=0.005,
         help="Maximum monthly hazard in the risk-to-hazard mapping; must be calibrated before predictive claims.",
     )
+    parser.add_argument("--target-term-default-rate", type=float, default=0.013, help="Target cumulative 90+ DPD default probability over the loan term for reference exposure (default: 1.3%).")
+    parser.add_argument("--reference-loan-amount", type=float, default=100_000_000, help="Reference loan amount for population calibration.")
     parser.add_argument("--social-reward-weight", type=float, default=1.0)
     parser.add_argument("--financial-reward-weight", type=float, default=1.0)
     parser.add_argument("--financial-reward-scale", type=float, default=100_000_000)
@@ -120,8 +127,18 @@ def main():
         raise ValueError("--hazard-slope must be finite and non-negative")
     if not math.isfinite(args.hazard_center):
         raise ValueError("--hazard-center must be finite")
-    if not math.isfinite(args.max_hazard) or args.max_hazard < 0:
-        raise ValueError("--max-hazard must be finite and non-negative")
+    if not math.isfinite(args.max_hazard) or args.max_hazard <= 0:
+        raise ValueError("--max-hazard must be finite and positive for calibration.")
+    if not math.isfinite(args.target_term_default_rate) or not 0 < args.target_term_default_rate < 1:
+        raise ValueError("--target-term-default-rate must be between 0 and 1.")
+    max_attainable_pd = -math.expm1(-args.max_hazard * args.loan_term_months)
+    if args.target_term_default_rate >= max_attainable_pd:
+        raise ValueError(
+            "--target-term-default-rate must be below the maximum term PD "
+            f"({max_attainable_pd:.6%}) allowed by max-hazard and loan term."
+        )
+    if not math.isfinite(args.reference_loan_amount) or args.reference_loan_amount <= 0:
+        raise ValueError("--reference-loan-amount must be finite and positive.")
 
     root = project_root()
     output_root = Path(args.output_dir).expanduser()
@@ -151,6 +168,24 @@ def main():
         split_seed=args.split_seed,
     )
 
+    # Calibration uses only observed risk/exposure features, not default labels.
+    # Combine the partitions to calibrate to the supplied bank-wide population
+    # benchmark while keeping the same fitted parameters for every policy.
+    calibration_population = pd.concat(
+        [train_raw, validation_raw, test_raw],
+        ignore_index=True,
+    )
+    hazard_calibration = calibrate_hazard_intercept_for_population(
+        raw_df=calibration_population,
+        target_term_default_rate=args.target_term_default_rate,
+        reference_loan_amount=args.reference_loan_amount,
+        loan_term_months=args.loan_term_months,
+        max_hazard=args.max_hazard,
+        hazard_slope=args.hazard_slope,
+        hazard_center=args.hazard_center,
+    )
+    hazard_intercept = float(hazard_calibration["hazard_intercept"])
+
     env = PortfolioLoanEnv(
         raw_df=train_raw,
         scaler=scaler,
@@ -167,6 +202,7 @@ def main():
         hazard_slope=args.hazard_slope,
         hazard_center=args.hazard_center,
         max_hazard=args.max_hazard,
+        hazard_intercept=hazard_intercept,
         social_reward_weight=args.social_reward_weight,
         financial_reward_weight=args.financial_reward_weight,
         financial_reward_scale=args.financial_reward_scale,
@@ -221,6 +257,10 @@ def main():
     print(f"Annual nominal rate    : {args.annual_interest_rate:.2%}")
     print(f"Monthly rate (derived) : {args.annual_interest_rate / 12.0:.6%}")
     print(f"Monthly hazard maximum : {args.max_hazard:.6f}")
+    print(f"Target term default rate: {args.target_term_default_rate:.4%}")
+    print(f"Reference loan amount  : {args.reference_loan_amount:,.0f}")
+    print(f"Calibrated term PD     : {hazard_calibration['calibrated_reference_term_default_rate']:.4%}")
+    print(f"Calibrated hazard int. : {hazard_intercept:.8f}")
     print(f"DPD default threshold  : >{args.default_dpd_threshold_days} days")
     print(f"Missed-payment collect : {args.default_collection_lag_months} months after due date")
     print("Payment behavior       : each installment is paid in full or missed in full")
@@ -246,9 +286,11 @@ def main():
                 else "legacy"
             ),
             "environment_class": "PortfolioLoanEnv",
-            "environment_model_version": 2,
+            "environment_model_version": 3,
             "payment_model": "stochastic_full_or_zero_installment",
             "default_definition": "a missed installment is defaulted after > default_dpd_threshold_days",
+            "hazard_intercept": hazard_intercept,
+            "hazard_calibration": hazard_calibration,
             **split_info,
         })
         config_path = run_dir / "config.json"
