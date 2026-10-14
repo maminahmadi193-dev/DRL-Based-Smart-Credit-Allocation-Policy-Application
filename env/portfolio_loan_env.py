@@ -533,6 +533,15 @@ class PortfolioLoanEnv(gym.Env):
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
 
+        # Keep repayment-event randomness separate from applicant/cohort sampling.
+        # This preserves matched applicant cohorts across baseline policies.
+        payment_seed = (
+            np.random.SeedSequence([int(seed), 0xC0FFEE])
+            if seed is not None
+            else None
+        )
+        payment_rng = np.random.default_rng(payment_seed)
+
         self.portfolio = PortfolioSimulator(
             initial_budget=self.initial_budget,
             monthly_capital_injection=(
@@ -548,7 +557,7 @@ class PortfolioLoanEnv(gym.Env):
                 max_hazard=self.max_hazard,
                 horizon_months=self.loan_term_months,
             ),
-            rng=self.np_random,
+            rng=payment_rng,
         )
 
         self.phase = "allocation"
