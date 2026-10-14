@@ -278,6 +278,42 @@ class TestPortfolioSimulator(unittest.TestCase):
             0.0,
         )
 
+    def test_hazard_intercept_calibrates_mean_term_pd_to_target(self):
+        risks = np.linspace(0.0, 100.0, 101)
+        target_rate = 0.013
+        maximum_hazard = 0.005
+        term_months = 18
+        slope = 0.08
+        center = 60.0
+
+        intercept = CustomerSimulator.calibrate_hazard_intercept(
+            reference_risks=risks,
+            target_term_default_rate=target_rate,
+            max_hazard=maximum_hazard,
+            hazard_slope=slope,
+            hazard_center=center,
+            horizon_months=term_months,
+        )
+        z = slope * (risks - center) + intercept
+        hazards = maximum_hazard / (1.0 + np.exp(-z))
+        term_pds = -np.expm1(-hazards * term_months)
+
+        self.assertAlmostEqual(float(np.mean(term_pds)), target_rate, places=12)
+        self.assertTrue(np.all(np.diff(term_pds) >= 0.0))
+        self.assertGreater(intercept, -60.0)
+        self.assertLess(intercept, 60.0)
+
+    def test_hazard_calibration_rejects_unattainable_target(self):
+        with self.assertRaises(ValueError):
+            CustomerSimulator.calibrate_hazard_intercept(
+                reference_risks=np.array([20.0, 80.0]),
+                target_term_default_rate=0.20,
+                max_hazard=0.005,
+                hazard_slope=0.08,
+                hazard_center=60.0,
+                horizon_months=18,
+            )
+
     def test_payment_rng_makes_missed_installment_path_reproducible(self):
         outcomes = []
         for seed in (987, 987):
