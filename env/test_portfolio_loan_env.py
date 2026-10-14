@@ -107,7 +107,6 @@ def make_env(**overrides):
         "origination_months": 2,
         "loan_term_months": 2,
         "annual_interest_rate": 0.0,
-        "recovery_rate": 0.0,
         "payment_delay_probability": 0.0,
     }
 
@@ -270,7 +269,6 @@ class TestPortfolioLoanEnv(unittest.TestCase):
             origination_months=2,
             loan_term_months=2,
             annual_interest_rate=0.0,
-            recovery_rate=0.0,
         )
 
         env.reset(seed=42)
@@ -468,7 +466,6 @@ class TestPortfolioLoanEnv(unittest.TestCase):
             origination_months=12,
             loan_term_months=18,
             annual_interest_rate=0.0,
-            recovery_rate=0.0,
         )
         env.reset(seed=42)
         env.portfolio.customer_simulator.max_hazard = 0.0
