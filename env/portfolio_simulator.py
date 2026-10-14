@@ -74,6 +74,16 @@ class MonthlyPortfolioResult:
     pending_delayed_receivables: float
     expected_delayed_installments: float
 
+    @property
+    def recognized_default_count(self) -> float:
+        """Actual number of contracts whose default was recognized this month."""
+        return self.expected_default_count
+
+    @property
+    def missed_installment_count(self) -> float:
+        """Actual number of complete installments missed this month."""
+        return self.expected_delayed_installments
+
 
 class PortfolioSimulator:
     """
