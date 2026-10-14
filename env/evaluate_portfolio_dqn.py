@@ -51,8 +51,11 @@ def evaluate_episode(run_name, model, config, raw_df, scaler, episode, seed):
         origination_months=int(config["origination_months"]),
         loan_term_months=int(config["loan_term_months"]),
         annual_interest_rate=float(config.get("annual_interest_rate", float(config.get("monthly_interest_rate", 0.0)) * 12.0)),
-        payment_delay_probability=float(config.get("payment_delay_probability", 0.0)),
-        delay_lag_weights=config.get("delay_lag_weights", (0.4, 0.3, 0.2, 0.1)),
+        default_collection_lag_months=int(config.get("default_collection_lag_months", 4)),
+        default_dpd_threshold_days=int(config.get("default_dpd_threshold_days", 90)),
+        hazard_slope=float(config.get("hazard_slope", 0.08)),
+        hazard_center=float(config.get("hazard_center", 60.0)),
+        max_hazard=float(config.get("max_hazard", 0.005)),
         social_reward_weight=float(config["social_reward_weight"]),
         financial_reward_weight=float(config["financial_reward_weight"]),
         financial_reward_scale=float(config["financial_reward_scale"]),
@@ -148,6 +151,7 @@ def evaluate_episode(run_name, model, config, raw_df, scaler, episode, seed):
         "interest_collected": float(portfolio.cumulative_interest_collected),
         "net_default_loss": float(portfolio.cumulative_net_default_loss),
         "expected_default_count": float(portfolio.cumulative_expected_defaults),
+        "recognized_default_count": float(portfolio.cumulative_expected_defaults),
         "delayed_payment_amount_scheduled": float(portfolio.cumulative_delayed_payment_amount_scheduled),
         "delayed_payment_amount_collected": float(portfolio.cumulative_delayed_payment_amount_collected),
         "pending_delayed_receivables": float(portfolio.pending_delayed_receivables),
@@ -198,7 +202,14 @@ def main():
                 f"Expected {model_path} and {config_path}. Train this run first."
             )
         with config_path.open("r", encoding="utf-8") as f:
-            run_configs[run_name] = json.load(f)
+            config = json.load(f)
+        if int(config.get("environment_model_version", 1)) < 2:
+            raise ValueError(
+                f"Model {run_name} was trained with the old fractional late-payment model. "
+                "Retrain it with env/train_portfolio_dqn.py before evaluating it under "
+                "the stochastic full-or-zero missed-installment model."
+            )
+        run_configs[run_name] = config
 
     first_config = run_configs[args.run_names[0]]
     split_seed = int(first_config["split_seed"])
