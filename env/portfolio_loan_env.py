@@ -624,7 +624,8 @@ class PortfolioLoanEnv(gym.Env):
                     monthly_result.net_default_loss
                 ),
                 "expected_default_count": monthly_result.expected_default_count,
-                "recognized_default_count": monthly_result.expected_default_count,
+                "recognized_default_count": monthly_result.recognized_default_count,
+                "missed_installment_count": monthly_result.missed_installment_count,
                 "gross_defaulted_principal": monthly_result.gross_defaulted_principal,
                 "available_budget": (
                     self.portfolio.available_budget
@@ -783,7 +784,8 @@ class PortfolioLoanEnv(gym.Env):
                     monthly_result.net_default_loss
                 ),
                 "expected_default_count": monthly_result.expected_default_count,
-                "recognized_default_count": monthly_result.expected_default_count,
+                "recognized_default_count": monthly_result.recognized_default_count,
+                "missed_installment_count": monthly_result.missed_installment_count,
                 "gross_defaulted_principal": monthly_result.gross_defaulted_principal,
                 "delayed_payment_amount_scheduled": (
                     monthly_result.delayed_payment_amount_scheduled
