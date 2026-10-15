@@ -31,6 +31,12 @@ def parse_args():
         required=True,
         help="Model run folders under models/portfolio_dqn, as created by train_portfolio_dqn.py.",
     )
+    parser.add_argument(
+        "--checkpoint-paths",
+        nargs="+",
+        default=None,
+        help="Optional model/checkpoint file for each run-name, in the same order.",
+    )
     parser.add_argument("--data", default=None, help="Optional override for the dataset path.")
     parser.add_argument("--episodes", type=int, default=20)
     parser.add_argument("--eval-seed", type=int, default=10_000)
@@ -220,14 +226,30 @@ def main():
     root = project_root()
     model_root = root / "models" / "portfolio_dqn"
 
+    checkpoint_paths = {}
+    if args.checkpoint_paths is not None:
+        if len(args.checkpoint_paths) != len(args.run_names):
+            raise ValueError(
+                "--checkpoint-paths must provide exactly one file per --run-names entry."
+            )
+        for run_name, supplied_path in zip(args.run_names, args.checkpoint_paths):
+            checkpoint_path = Path(supplied_path).expanduser()
+            if not checkpoint_path.is_absolute():
+                checkpoint_path = root / checkpoint_path
+            if not checkpoint_path.is_file():
+                raise FileNotFoundError(
+                    f"Checkpoint for {run_name} does not exist: {checkpoint_path}"
+                )
+            checkpoint_paths[run_name] = checkpoint_path
+
     run_configs = {}
     for run_name in args.run_names:
         run_dir = model_root / run_name
-        model_path = run_dir / "model.zip"
+        model_path = checkpoint_paths.get(run_name, run_dir / "model.zip")
         config_path = run_dir / "config.json"
         if not model_path.is_file() or not config_path.is_file():
             raise FileNotFoundError(
-                f"Missing model or config for {run_name}. "
+                f"Missing model/checkpoint or config for {run_name}. "
                 f"Expected {model_path} and {config_path}. Train this run first."
             )
         with config_path.open("r", encoding="utf-8") as f:
@@ -272,7 +294,10 @@ def main():
 
     for run_name in args.run_names:
         config = run_configs[run_name]
-        model_path = model_root / run_name / "model.zip"
+        model_path = checkpoint_paths.get(
+            run_name,
+            model_root / run_name / "model.zip",
+        )
         model = DQN.load(str(model_path), device="auto")
         print(f"Evaluating {run_name} | trained reward mode={config['reward_mode']}")
 
@@ -288,6 +313,7 @@ def main():
                 seed=seed,
             )
             result["split"] = args.split
+            result["model_path_used"] = str(model_path)
             episode_rows.append(result)
             print(
                 f"  episode {episode + 1}/{args.episodes} | seed={seed} | "
