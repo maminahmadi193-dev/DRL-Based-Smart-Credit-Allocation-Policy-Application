@@ -43,34 +43,38 @@ class CustomerSimulator:
         approving an unsecured loan.
         """
 
+        amount = float(approved_unsecured_amount)
+        if not np.isfinite(amount) or amount < 0.0:
+            raise ValueError("approved_unsecured_amount must be finite and non-negative.")
+
         updated = customer.copy()
 
-        if approved_unsecured_amount ==0 : 
-            return updated
+        # Normalize the financial quantities before deriving ratios. This keeps
+        # malformed/legacy negative values from propagating into the state.
+        updated.debt = max(0.0, float(updated.debt))
+        updated.origin_amount = max(0.0, float(updated.origin_amount))
+        updated.loan_count = max(0, int(updated.loan_count))
 
-        # Total debt increases
-        updated.debt += approved_unsecured_amount
+        if amount > 0.0:
+            updated.debt += amount
+            updated.origin_amount += amount
+            updated.loan_count += 1
 
-        # Total originated loans increases
-        updated.origin_amount += approved_unsecured_amount
-
-        # One more active loan
-        updated.loan_count += 1
-
-        # Derived features
+        # Derived debt features are always non-negative. DebtPerLoan is based
+        # on total current debt divided by the cumulative number of loans.
         updated.debt_ratio = (
-            updated.debt /
-            updated.origin_amount
-            if updated.origin_amount > 0
+            updated.debt / updated.origin_amount
+            if updated.origin_amount > 0.0
             else 0.0
         )
-
         updated.debt_per_loan = (
-            updated.debt /
-            updated.loan_count
+            updated.debt / updated.loan_count
             if updated.loan_count > 0
             else 0.0
         )
+
+        updated.debt_ratio = max(0.0, float(updated.debt_ratio))
+        updated.debt_per_loan = max(0.0, float(updated.debt_per_loan))
 
         return updated
 
@@ -165,30 +169,34 @@ class CustomerSimulator:
         # 1. Debt ratio effect
         # --------------------------------------------------
 
-        debt_ratio_change = (
-            customer.debt_ratio
-            - previous_customer.debt_ratio
+        debt_ratio_change = max(
+            0.0,
+            float(customer.debt_ratio) - float(previous_customer.debt_ratio),
         )
 
         # --------------------------------------------------
         # 2. Debt per loan effect
         # --------------------------------------------------
-
-        if previous_customer.debt_per_loan > 0:
-
-            debt_per_loan_change = (
-                customer.debt_per_loan
-                - previous_customer.debt_per_loan
-            ) / previous_customer.debt_per_loan
-
+        # A new loan must not reduce risk merely because the average debt per
+        # loan decreases when another (smaller) loan is added. When the
+        # previous average is zero, normalize by the largest available action.
+        if previous_customer.debt_per_loan > 0.0:
+            debt_per_loan_change = max(
+                0.0,
+                (
+                    float(customer.debt_per_loan)
+                    - float(previous_customer.debt_per_loan)
+                ) / float(previous_customer.debt_per_loan),
+            )
         else:
-
-            debt_per_loan_change = 0.0
+            debt_per_loan_change = min(
+                max(float(customer.debt_per_loan), 0.0) / 500_000_000.0,
+                1.0,
+            )
 
         # --------------------------------------------------
         # 3. Repayment capacity pressure
         # --------------------------------------------------
-
         capacity_pressure = self._calculate_capacity_pressure(
             monthly_income=previous_customer.monthly_income,
             approved_unsecured_amount=approved_unsecured_amount,
@@ -197,11 +205,13 @@ class CustomerSimulator:
         # --------------------------------------------------
         # 4. Total risk change
         # --------------------------------------------------
-
-        delta_risk = (
+        # Risk loading at origination is non-negative. Its dynamic decay is
+        # handled by PortfolioSimulator as principal is repaid/collected.
+        delta_risk = max(
+            0.0,
             self.alpha * debt_ratio_change
             + self.beta * debt_per_loan_change
-            + self.gamma * capacity_pressure
+            + self.gamma * capacity_pressure,
         )
 
         # --------------------------------------------------
