@@ -380,7 +380,7 @@ class PortfolioLoanEnv(gym.Env):
         # If the source population is exhausted, use additional eligible
         # returners to fill remaining cohort slots, without same-month duplicates.
         remaining_slots = cohort_size - len(selected)
-        if remaining_slots:
+        if remaining_slots and self.reapplication_share > 0.0:
             selected_set = set(int(idx) for idx in selected)
             fallback_pool = np.asarray(
                 [
