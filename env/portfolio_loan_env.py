@@ -70,6 +70,8 @@ class PortfolioLoanEnv(gym.Env):
         financial_reward_scale=100_000_000,
         invalid_action_penalty=0.25,
         scale_access_rewards_by_coverage=False,
+        risk_weight=1.0,
+        default_cost=10.0,
     ):
         super().__init__()
 
@@ -212,7 +214,9 @@ class PortfolioLoanEnv(gym.Env):
             scale_access_rewards_by_coverage
         )
         self.reward_engine = RewardEngine(
-            scale_access_rewards_by_coverage=self.scale_access_rewards_by_coverage
+            scale_access_rewards_by_coverage=self.scale_access_rewards_by_coverage,
+            risk_weight=risk_weight,
+            default_cost=default_cost,
         )
 
         self.action_space = gym.spaces.Discrete(
@@ -245,36 +249,35 @@ class PortfolioLoanEnv(gym.Env):
     # ==========================================================
 
     def _row_to_customer_state(self, row):
+        # Historical source fields can contain inconsistent derived ratios.
+        # Keep debt-related values non-negative and derive both ratios from
+        # the underlying debt, originated amount, and cumulative loan count.
+        debt = max(0.0, float(row["DebtAmount"]))
+        origin_amount = max(0.0, float(row["OriginAmount"]))
+        loan_count = max(0, int(row["LoanCounts"]))
+        debt_ratio = debt / origin_amount if origin_amount > 0.0 else 0.0
+        debt_per_loan = debt / loan_count if loan_count > 0 else 0.0
+
         return CustomerState(
             monthly_income=float(row["MountlyIncome"]),
-
             income_score=float(row["IncomeScore"]),
             job_score=float(row["JobScore"]),
             asset_score=float(row["AssetScore"]),
-            total_customer_score=float(
-                row["TotalCustomerScore"]
-            ),
-
-            total_facilities=float(row["TotalFacilities"]),
-            debt=float(row["DebtAmount"]),
-            origin_amount=float(row["OriginAmount"]),
-            loan_count=int(row["LoanCounts"]),
-
-            debt_ratio=float(row["DebtRatio"]),
-            debt_per_loan=float(row["DebtPerLoan"]),
-
+            total_customer_score=float(row["TotalCustomerScore"]),
+            total_facilities=max(0.0, float(row["TotalFacilities"])),
+            debt=debt,
+            origin_amount=origin_amount,
+            loan_count=loan_count,
+            debt_ratio=max(0.0, float(debt_ratio)),
+            debt_per_loan=max(0.0, float(debt_per_loan)),
             has_no_history=bool(row["Has_No_History"]),
             employed=bool(row["Employed"]),
-
             score_min=float(row["Score_Min"]),
             score_max=float(row["Score_Max"]),
-
             risk_min=float(row["Risk_Min"]),
             risk_max=float(row["Risk_Max"]),
-
             risk=(
-                float(row["Risk_Min"])
-                + float(row["Risk_Max"])
+                float(row["Risk_Min"]) + float(row["Risk_Max"])
             ) / 2.0,
         )
 
@@ -315,8 +318,11 @@ class PortfolioLoanEnv(gym.Env):
 
         row = self.raw_df.iloc[self.current_row_index]
 
-        self.current_customer = (
-            self._row_to_customer_state(row)
+        # A repeated empirical row maps to the same persistent customer
+        # state for this episode, retaining earlier simulated loans and repayments.
+        self.current_customer = self.portfolio.register_customer(
+            customer_id=self.current_row_index,
+            initial_state=self._row_to_customer_state(row),
         )
 
     # ==========================================================
@@ -607,7 +613,10 @@ class PortfolioLoanEnv(gym.Env):
         if self.phase == "settlement":
             monthly_result = self.portfolio.advance_month()
 
-            reward = self._financial_reward(monthly_result)
+            default_penalty = self.reward_engine.recognized_default_penalty(
+                monthly_result.recognized_default_count
+            )
+            reward = self._financial_reward(monthly_result) - default_penalty
 
             terminated = self.portfolio.is_fully_settled
 
@@ -620,6 +629,7 @@ class PortfolioLoanEnv(gym.Env):
                 "action_ignored": True,
                 "month": monthly_result.month,
                 "financial_pnl": monthly_result.financial_pnl,
+                "default_penalty": default_penalty,
                 "principal_collected": (
                     monthly_result.principal_collected
                 ),
@@ -677,31 +687,35 @@ class PortfolioLoanEnv(gym.Env):
         invalid_action = False
         approved_amount = 0
         contract_id = None
+        social_reward = 0.0
+        risk_penalty = 0.0
+        default_penalty = 0.0
 
         if requested_amount > 0:
             if not self.portfolio.can_fund(requested_amount):
                 # Do not grant an unaffordable loan.
-                # Apply an explicit penalty rather than crashing.
                 invalid_action = True
                 reward = -self.invalid_action_penalty
-
             else:
                 contract = self.portfolio.grant_loan(
                     customer=customer,
                     approved_amount=requested_amount,
                     customer_id=self.current_row_index,
                 )
-
                 approved_amount = requested_amount
                 contract_id = contract.loan_id
 
-                reward = (
+                social_reward = (
                     self.social_reward_weight
                     * self.reward_engine._social_reward(
                         previous_customer=customer,
                         approved_unsecured_amount=approved_amount,
                     )
                 )
+                risk_penalty = self.reward_engine.risk_increase_penalty(
+                    contract.risk_loading
+                )
+                reward = social_reward - risk_penalty
         else:
             reward = 0.0
 
@@ -731,7 +745,10 @@ class PortfolioLoanEnv(gym.Env):
             # Advance the calendar and service existing loans.
             monthly_result = self.portfolio.advance_month()
 
-            reward += self._financial_reward(monthly_result)
+            default_penalty = self.reward_engine.recognized_default_penalty(
+                monthly_result.recognized_default_count
+            )
+            reward += self._financial_reward(monthly_result) - default_penalty
 
             # Continue allocation until every planned month
             # has had its own complete applicant cohort.
@@ -762,14 +779,9 @@ class PortfolioLoanEnv(gym.Env):
             "approved_amount": approved_amount,
             "invalid_action": invalid_action,
             "contract_id": contract_id,
-            "social_reward": (
-                0.0 if invalid_action else
-                reward - (
-                    self._financial_reward(monthly_result)
-                    if monthly_result is not None
-                    else 0.0
-                )
-            ),
+            "social_reward": social_reward,
+            "risk_penalty": risk_penalty,
+            "default_penalty": default_penalty,
             "financial_pnl": (
                 0.0 if monthly_result is None
                 else monthly_result.financial_pnl
