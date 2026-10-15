@@ -300,6 +300,7 @@ def main():
             "environment_model_version": 7,
             "applicant_arrival_model": "unique_first_time_rows_plus_configurable_reapplications",
             "reapplication_eligibility": "cooldown_elapsed_and_no_unresolved_overdue_installment",
+            "new_to_credit_reward_policy": "one_time_until_first_simulated_contract",
             "payment_model": "stochastic_full_or_zero_installment",
             "default_definition": "a missed installment is defaulted after > default_dpd_threshold_days",
             "hazard_intercept": hazard_intercept,
