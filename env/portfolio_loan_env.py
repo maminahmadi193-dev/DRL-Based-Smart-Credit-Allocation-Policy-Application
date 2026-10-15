@@ -199,9 +199,13 @@ class PortfolioLoanEnv(gym.Env):
         # CustomerSimulator hazard model; queued receipts remain observable.
         self.delay_model_enabled = True
         self.delay_observation_horizon = 12
+        # Two features describe the current applicant's history: whether
+        # this is a reapplication and how many applications they made before it.
+        self.application_history_feature_count = 2
         self.PORTFOLIO_FEATURE_COUNT = (
             type(self).PORTFOLIO_FEATURE_COUNT
             + int(self.random_monthly_cohorts)
+            + self.application_history_feature_count
             + (self.delay_observation_horizon if self.delay_model_enabled else 0)
         )
         self.origination_months = int(origination_months)
@@ -260,6 +264,7 @@ class PortfolioLoanEnv(gym.Env):
         self.current_customer = None
         self.current_row_index = None
         self.current_is_reapplication = False
+        self.current_prior_application_count = 0
         self.seen_customer_indices = set()
         self.last_application_month = {}
         self.application_count_by_customer = {}
@@ -424,6 +429,7 @@ class PortfolioLoanEnv(gym.Env):
             0,
         )
         self.current_is_reapplication = prior_applications > 0
+        self.current_prior_application_count = int(prior_applications)
 
         if self.current_is_reapplication:
             self.reapplications_seen += 1
@@ -613,7 +619,23 @@ class PortfolioLoanEnv(gym.Env):
             )
             portfolio_values.append(cohort_size_ratio)
 
+        applicant_is_reapplication = (
+            float(self.current_is_reapplication)
+            if self.phase == "allocation"
+            else 0.0
+        )
+        previous_application_count_ratio = (
+            min(
+                np.log1p(self.current_prior_application_count)
+                / max(np.log1p(self.origination_months), 1e-8),
+                1.0,
+            )
+            if self.phase == "allocation"
+            else 0.0
+        )
         portfolio_values.extend([
+            applicant_is_reapplication,
+            previous_application_count_ratio,
             settlement_flag,
             transition_flag,
             active_contract_ratio,
@@ -707,6 +729,7 @@ class PortfolioLoanEnv(gym.Env):
         self.current_customer = None
         self.current_row_index = None
         self.current_is_reapplication = False
+        self.current_prior_application_count = 0
         self.seen_customer_indices = set()
         self.last_application_month = {}
         self.application_count_by_customer = {}
