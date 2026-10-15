@@ -569,6 +569,9 @@ class TestPortfolioLoanEnv(unittest.TestCase):
         self.assertFalse(terminated)
         self.assertTrue(env.observation_space.contains(observation_1))
         self.assertEqual(env.phase, "settlement")
+        # A forced missed installment is not yet a recognized default (>90 DPD),
+        # so the 10-point penalty must not be applied at origination/first miss.
+        self.assertEqual(info_1["default_penalty"], 0.0)
         self.assertAlmostEqual(info_1["principal_collected"], 0.0)
         self.assertAlmostEqual(info_1["interest_collected"], 0.0)
         self.assertEqual(info_1["missed_installment_count"], 1.0)
@@ -593,11 +596,18 @@ class TestPortfolioLoanEnv(unittest.TestCase):
             _, _, terminated, _, _ = env.step(0)
             self.assertFalse(terminated)
             self.assertEqual(env.portfolio.month, month)
-        _, _, terminated, _, info_6 = env.step(0)
+        _, reward_6, terminated, _, info_6 = env.step(0)
         self.assertTrue(terminated)
         self.assertEqual(env.portfolio.month, 6)
         self.assertEqual(info_6["expected_default_count"], 1.0)
         self.assertEqual(info_6["recognized_default_count"], 1.0)
+        self.assertEqual(info_6["default_penalty"], 10.0)
+        self.assertAlmostEqual(
+            reward_6,
+            env._financial_reward(env.portfolio and type("Monthly", (), {
+                "financial_pnl": info_6["financial_pnl"]
+            })()) - 10.0,
+        )
         self.assertEqual(info_6["missed_installment_count"], 0.0)
         self.assertGreater(info_6["delayed_payment_amount_collected"], 0.0)
         self.assertAlmostEqual(env.portfolio.cumulative_net_default_loss, 0.0)
@@ -609,6 +619,39 @@ class TestPortfolioLoanEnv(unittest.TestCase):
             env.portfolio.available_budget,
             initial_cash + env.portfolio.cumulative_interest_collected,
             delta=0.01,
+        )
+        env.close()
+
+    def test_repeated_applicant_uses_persistent_customer_state(self):
+        env = make_env(
+            initial_budget=500_000_000,
+            applicants_per_month=2,
+            origination_months=1,
+            loan_term_months=2,
+            max_hazard=0.0,
+        )
+        env.reset(seed=42)
+        customer_id = env.current_row_index
+        original_debt = env.current_customer.debt
+
+        # Simulate the same empirical customer obtaining a loan, then appearing
+        # again in the monthly cohort. Loading the source row must not reset debt.
+        env.portfolio.grant_loan(
+            customer=env.current_customer,
+            approved_amount=100_000_000,
+            customer_id=customer_id,
+        )
+        env.current_cohort_indices = np.array([customer_id, customer_id], dtype=int)
+        env.current_applicant_position = 0
+        env._load_current_applicant()
+
+        self.assertAlmostEqual(
+            env.current_customer.debt,
+            original_debt + 100_000_000,
+        )
+        self.assertEqual(
+            env.current_customer.loan_count,
+            max(0, int(env.raw_df.iloc[customer_id]["LoanCounts"])) + 1,
         )
         env.close()
 
