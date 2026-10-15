@@ -79,6 +79,7 @@ def evaluate_episode(run_name, model, config, raw_df, scaler, episode, seed):
 
     max_steps = (
         env.max_applicants_per_month * env.origination_months
+        + env.origination_months
         + env.loan_term_months + env.portfolio.max_delay_months + 10
     )
 
