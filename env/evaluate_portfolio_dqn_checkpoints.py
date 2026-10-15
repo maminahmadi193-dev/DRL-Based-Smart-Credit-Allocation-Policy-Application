@@ -10,6 +10,7 @@ without rerunning multiple training seeds.
 from __future__ import annotations
 
 import argparse
+import json
 import re
 from pathlib import Path
 
@@ -49,7 +50,8 @@ def main():
     if not config_path.is_file():
         raise FileNotFoundError(f"Missing run config: {config_path}")
 
-    config = pd.read_json(config_path, typ="series").to_dict()
+    with config_path.open("r", encoding="utf-8") as config_file:
+        config = json.load(config_file)
     if int(config.get("environment_model_version", 1)) < 5:
         raise ValueError(
             "This run predates the configurable reapplication process. "
@@ -67,7 +69,7 @@ def main():
     checkpoints = [
         (int(match.group(1)), path)
         for path in checkpoints
-        if (match := re.search(r"_(\\d+)_steps\\.zip$", path.name))
+        if (match := re.search(r"_(\d+)_steps\.zip$", path.name))
     ]
     checkpoints.sort(key=lambda item: item[0])
     if not checkpoints:
