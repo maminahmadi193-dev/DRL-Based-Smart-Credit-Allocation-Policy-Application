@@ -53,8 +53,8 @@ def main():
         config = json.load(config_file)
     if int(config.get("environment_model_version", 1)) < 7:
         raise ValueError(
-            "This run predates the applicant-history observation schema. "
-            "Retrain with the current env/train_portfolio_dqn.py first."
+            "This run predates the current reapplication and one-time new-to-credit "
+            "state behavior. Retrain with the current env/train_portfolio_dqn.py first."
         )
 
     checkpoint_dir = (
