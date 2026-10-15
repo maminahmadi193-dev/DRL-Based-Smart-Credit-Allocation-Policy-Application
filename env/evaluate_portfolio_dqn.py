@@ -254,7 +254,7 @@ def main():
             )
         with config_path.open("r", encoding="utf-8") as f:
             config = json.load(f)
-        if int(config.get("environment_model_version", 1)) < 6:
+        if int(config.get("environment_model_version", 1)) < 7:
             raise ValueError(
                 f"Model {run_name} predates the unique first-time applicant, "
                 "configurable reapplication process, and applicant-history observation. "
