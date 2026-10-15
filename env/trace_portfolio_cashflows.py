@@ -135,6 +135,7 @@ def main():
         terminated = False
         max_steps = (
             env.max_applicants_per_month * env.origination_months
+            + env.origination_months
             + env.loan_term_months
             + env.portfolio.max_delay_months
             + 5
