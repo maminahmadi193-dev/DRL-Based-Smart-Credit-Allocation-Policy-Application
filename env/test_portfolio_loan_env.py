@@ -780,6 +780,42 @@ class TestPortfolioLoanEnv(unittest.TestCase):
         self.assertEqual(env.reapplications_seen, 0)
         env.close()
 
+    def test_new_to_credit_status_clears_after_first_simulated_loan(self):
+        env = make_env(
+            initial_budget=300_000_000,
+            applicants_per_month=1,
+            origination_months=2,
+            loan_term_months=4,
+            max_hazard=0.0,
+        )
+        env.reset(seed=75)
+        customer_id = env.current_row_index
+
+        # Make the selected source row explicitly new-to-credit for this test.
+        baseline = env.portfolio.customer_baselines[customer_id].copy()
+        baseline.has_no_history = True
+        env.portfolio.customer_baselines[customer_id] = baseline.copy()
+        env.portfolio.customer_states[customer_id] = baseline.copy()
+        env.current_customer = baseline.copy()
+
+        self.assertEqual(
+            env.reward_engine._history_reward(baseline, coverage=1.0),
+            env.reward_engine.history_reward,
+        )
+
+        env.portfolio.grant_loan(
+            customer=baseline,
+            approved_amount=100_000_000,
+            customer_id=customer_id,
+        )
+        updated = env.portfolio.get_customer_state(customer_id)
+        self.assertFalse(updated.has_no_history)
+        self.assertEqual(
+            env.reward_engine._history_reward(updated, coverage=1.0),
+            0.0,
+        )
+        env.close()
+
     def test_reapplication_respects_configured_three_month_cooldown(self):
         env = make_env(
             applicants_per_month=2,
