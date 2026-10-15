@@ -187,8 +187,8 @@ class PortfolioLoanEnv(gym.Env):
         # estimate of real application behavior.
         self.reapplication_share = float(reapplication_share)
         self.reapplication_cooldown_months = int(reapplication_cooldown_months)
-        # Preserve the legacy observation shape for fixed-cohort models.
-        # Variable-cohort models get one extra feature for current cohort size.
+        # Fixed-cohort mode omits the cohort-size feature; variable-cohort
+        # mode adds that feature to the shared applicant-history features.
         self.default_collection_lag_months = int(default_collection_lag_months)
         self.default_dpd_threshold_days = int(default_dpd_threshold_days)
         self.hazard_slope = float(hazard_slope)
