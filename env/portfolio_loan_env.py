@@ -72,6 +72,8 @@ class PortfolioLoanEnv(gym.Env):
         scale_access_rewards_by_coverage=False,
         risk_weight=1.0,
         default_cost=10.0,
+        reapplication_share=0.10,
+        reapplication_cooldown_months=3,
     ):
         super().__init__()
 
@@ -83,6 +85,14 @@ class PortfolioLoanEnv(gym.Env):
 
         if applicants_per_month <= 0:
             raise ValueError("applicants_per_month must be positive.")
+
+        if not np.isfinite(reapplication_share) or not 0.0 <= reapplication_share <= 1.0:
+            raise ValueError("reapplication_share must be finite and between 0 and 1.")
+        if (
+            not isinstance(reapplication_cooldown_months, int)
+            or reapplication_cooldown_months < 1
+        ):
+            raise ValueError("reapplication_cooldown_months must be a positive integer.")
 
         if (min_applicants_per_month is None) != (max_applicants_per_month is None):
             raise ValueError(
@@ -172,6 +182,11 @@ class PortfolioLoanEnv(gym.Env):
         self.random_monthly_cohorts = (
             self.min_applicants_per_month < self.max_applicants_per_month
         )
+        # Each cohort is a mix of first-time rows and explicitly selected
+        # returning applicants. This is a scenario assumption, not a fitted
+        # estimate of real application behavior.
+        self.reapplication_share = float(reapplication_share)
+        self.reapplication_cooldown_months = int(reapplication_cooldown_months)
         # Preserve the legacy observation shape for fixed-cohort models.
         # Variable-cohort models get one extra feature for current cohort size.
         self.default_collection_lag_months = int(default_collection_lag_months)
@@ -244,6 +259,13 @@ class PortfolioLoanEnv(gym.Env):
         self.total_applicants_seen = 0
         self.current_customer = None
         self.current_row_index = None
+        self.current_is_reapplication = False
+        self.seen_customer_indices = set()
+        self.last_application_month = {}
+        self.application_count_by_customer = {}
+        self.new_applicants_seen = 0
+        self.reapplications_seen = 0
+        self.customers_with_reapplications = set()
 
     # ==========================================================
     # Data conversion
@@ -284,10 +306,14 @@ class PortfolioLoanEnv(gym.Env):
 
     def _load_new_cohort(self):
         """
-        Sample the next monthly applicant cohort.
+        Build a cohort from unique first-time applicants and a separate
+        reapplication stream.
 
-        Sampling with replacement allows the dataset to serve
-        as an empirical population for repeated simulation.
+        A source row can enter the episode for the first time only once.
+        Returning customers are sampled separately after the configured
+        cooldown, and a customer cannot appear twice in the same monthly
+        cohort. The cohort size remains within the configured 30..70 range
+        whenever the available applicant pools are large enough.
         """
         if self.random_monthly_cohorts:
             cohort_size = int(
@@ -297,17 +323,89 @@ class PortfolioLoanEnv(gym.Env):
                 )
             )
         else:
-            # Do not consume an extra RNG draw in fixed-cohort mode;
-            # legacy seeded applicant samples therefore remain unchanged.
+            # Preserve the fixed-size cohort configuration.
             cohort_size = self.min_applicants_per_month
 
-        self.current_cohort_indices = self.np_random.choice(
-            len(self.raw_df),
-            size=cohort_size,
-            replace=True,
+        month = int(self.portfolio.month)
+        seen = self.seen_customer_indices
+        unseen_pool = np.asarray(
+            [idx for idx in range(len(self.raw_df)) if idx not in seen],
+            dtype=int,
         )
-        self.current_applicant_position = 0
+        reapplication_pool = np.asarray(
+            [
+                idx
+                for idx, last_month in self.last_application_month.items()
+                if month - last_month >= self.reapplication_cooldown_months
+            ],
+            dtype=int,
+        )
 
+        target_reapplications = (
+            int(np.ceil(cohort_size * self.reapplication_share))
+            if self.reapplication_share > 0.0
+            else 0
+        )
+        target_reapplications = min(target_reapplications, cohort_size)
+
+        reapplication_count = min(
+            target_reapplications,
+            len(reapplication_pool),
+        )
+        if reapplication_count:
+            selected_reapplications = self.np_random.choice(
+                reapplication_pool,
+                size=reapplication_count,
+                replace=False,
+            ).astype(int)
+        else:
+            selected_reapplications = np.array([], dtype=int)
+
+        remaining_slots = cohort_size - len(selected_reapplications)
+        new_count = min(remaining_slots, len(unseen_pool))
+        if new_count:
+            selected_new = self.np_random.choice(
+                unseen_pool,
+                size=new_count,
+                replace=False,
+            ).astype(int)
+        else:
+            selected_new = np.array([], dtype=int)
+
+        selected = np.concatenate([selected_reapplications, selected_new])
+
+        # If the source population is exhausted, use additional eligible
+        # returners to fill remaining cohort slots, without same-month duplicates.
+        remaining_slots = cohort_size - len(selected)
+        if remaining_slots:
+            selected_set = set(int(idx) for idx in selected)
+            fallback_pool = np.asarray(
+                [
+                    idx for idx in reapplication_pool
+                    if int(idx) not in selected_set
+                ],
+                dtype=int,
+            )
+            fallback_count = min(remaining_slots, len(fallback_pool))
+            if fallback_count:
+                extra_returners = self.np_random.choice(
+                    fallback_pool,
+                    size=fallback_count,
+                    replace=False,
+                ).astype(int)
+                selected = np.concatenate([selected, extra_returners])
+
+        self.current_cohort_indices = np.asarray(selected, dtype=int)
+        if len(self.current_cohort_indices) == 0:
+            raise RuntimeError(
+                "No applicants are available for this month. Increase the source "
+                "population or make more customers eligible to reapply."
+            )
+
+        # Shuffle new and returning applicants together so the order does not
+        # reveal the applicant type to the policy.
+        self.np_random.shuffle(self.current_cohort_indices)
+        self.current_applicant_position = 0
         self._load_current_applicant()
 
     def _load_current_applicant(self):
@@ -318,9 +416,28 @@ class PortfolioLoanEnv(gym.Env):
         )
 
         row = self.raw_df.iloc[self.current_row_index]
+        prior_applications = self.application_count_by_customer.get(
+            self.current_row_index,
+            0,
+        )
+        self.current_is_reapplication = prior_applications > 0
 
-        # A repeated empirical row maps to the same persistent customer
-        # state for this episode, retaining earlier simulated loans and repayments.
+        if self.current_is_reapplication:
+            self.reapplications_seen += 1
+            self.customers_with_reapplications.add(self.current_row_index)
+        else:
+            self.new_applicants_seen += 1
+
+        self.application_count_by_customer[self.current_row_index] = (
+            prior_applications + 1
+        )
+        self.seen_customer_indices.add(self.current_row_index)
+        self.last_application_month[self.current_row_index] = int(
+            self.portfolio.month
+        )
+
+        # Repeated applications recover the persistent simulated state for
+        # this customer instead of rebuilding it from the raw source row.
         self.current_customer = self.portfolio.register_customer(
             customer_id=self.current_row_index,
             initial_state=self._row_to_customer_state(row),
@@ -581,11 +698,21 @@ class PortfolioLoanEnv(gym.Env):
         self.phase = "allocation"
         self.episode_done = False
         self._transition_after_allocation_month = None
+        self.total_applicants_seen = 0
+        self.current_cohort_indices = np.array([], dtype=int)
+        self.current_applicant_position = 0
+        self.current_customer = None
+        self.current_row_index = None
+        self.current_is_reapplication = False
+        self.seen_customer_indices = set()
+        self.last_application_month = {}
+        self.application_count_by_customer = {}
+        self.new_applicants_seen = 0
+        self.reapplications_seen = 0
+        self.customers_with_reapplications = set()
 
         # Start the first allocation month.
         self.portfolio.advance_month()
-
-        self.total_applicants_seen = 0
         self._load_new_cohort()
 
         return self._get_observation(), {
@@ -730,6 +857,7 @@ class PortfolioLoanEnv(gym.Env):
         requested_amount = self.ACTION_AMOUNTS[action]
         cohort_size = len(self.current_cohort_indices)
         acted_customer_index = self.current_row_index
+        acted_customer_is_reapplication = self.current_is_reapplication
 
         row = self.raw_df.iloc[self.current_row_index]
 
@@ -802,6 +930,7 @@ class PortfolioLoanEnv(gym.Env):
             "phase": self.phase,
             "month": self.portfolio.month,
             "customer_index": acted_customer_index,
+            "is_reapplication": acted_customer_is_reapplication,
             "applicants_in_cohort": cohort_size,
             "total_applicants_seen": self.total_applicants_seen,
             "action_index": action,
