@@ -344,12 +344,12 @@ class PortfolioLoanEnv(gym.Env):
             dtype=int,
         )
 
-        target_reapplications = (
-            int(np.ceil(cohort_size * self.reapplication_share))
-            if self.reapplication_share > 0.0
-            else 0
+        # Treat reapplication_share as a per-slot probability. This avoids
+        # turning a 10% scenario into 100% repeat applications when a fixed
+        # cohort contains only one applicant.
+        target_reapplications = int(
+            self.np_random.binomial(cohort_size, self.reapplication_share)
         )
-        target_reapplications = min(target_reapplications, cohort_size)
 
         reapplication_count = min(
             target_reapplications,
