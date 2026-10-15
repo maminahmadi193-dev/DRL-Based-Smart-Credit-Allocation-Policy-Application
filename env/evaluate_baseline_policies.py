@@ -92,6 +92,9 @@ METRICS = (
     "recognized_default_count",
     "realized_default_rate",
     "contract_term_pd",
+    "new_applicants_seen",
+    "reapplications_seen",
+    "customers_with_reapplications",
     "missed_installment_count",
     "delayed_payment_amount_scheduled",
     "delayed_payment_amount_collected",
@@ -262,6 +265,8 @@ def evaluate_one_episode(policy: str, episode: int, seed: int, df: pd.DataFrame,
         applicants_per_month=args.applicants_per_month,
         min_applicants_per_month=args.min_applicants_per_month,
         max_applicants_per_month=args.max_applicants_per_month,
+        reapplication_share=args.reapplication_share,
+        reapplication_cooldown_months=args.reapplication_cooldown_months,
         origination_months=args.origination_months,
         loan_term_months=args.loan_term_months,
         annual_interest_rate=args.annual_interest_rate,
@@ -357,6 +362,9 @@ def evaluate_one_episode(policy: str, episode: int, seed: int, df: pd.DataFrame,
         "expected_delayed_installments": float(portfolio.cumulative_expected_delayed_installments),
         "principal_collected": principal_collected,
         "applicants_seen": int(applicants_seen),
+        "new_applicants_seen": int(env.new_applicants_seen),
+        "reapplications_seen": int(env.reapplications_seen),
+        "customers_with_reapplications": int(len(env.customers_with_reapplications)),
         "loans_granted": loans_granted,
         "loan_approval_rate": loans_granted / applicants_seen if applicants_seen else 0.0,
         "total_disbursed": total_disbursed,
@@ -422,6 +430,8 @@ def parse_args():
     parser.add_argument("--applicants-per-month", type=int, default=None, help="Legacy fixed cohort size. When supplied alone, monthly cohort size is fixed.")
     parser.add_argument("--min-applicants-per-month", type=int, default=None, help="Minimum monthly cohort size (inclusive); default range is 30..70.")
     parser.add_argument("--max-applicants-per-month", type=int, default=None, help="Maximum monthly cohort size (inclusive).")
+    parser.add_argument("--reapplication-share", type=float, default=0.10, help="Target share of monthly applicants who reapply after cooldown; a scenario assumption.")
+    parser.add_argument("--reapplication-cooldown-months", type=int, default=3, help="Minimum months since the customer's previous application before reapplying.")
     parser.add_argument("--origination-months", type=int, default=12)
     parser.add_argument("--loan-term-months", type=int, choices=[12, 18, 24, 36], default=18)
     parser.add_argument("--annual-interest-rate", type=float, default=0.04, help="Nominal annual interest rate; converted to monthly rate internally.")
@@ -473,6 +483,10 @@ def main():
         raise ValueError("--min-applicants-per-month must be >= 1")
     if args.max_applicants_per_month < args.min_applicants_per_month:
         raise ValueError("--max-applicants-per-month must be >= min-applicants-per-month")
+    if not np.isfinite(args.reapplication_share) or not 0.0 <= args.reapplication_share <= 1.0:
+        raise ValueError("--reapplication-share must be between 0 and 1.")
+    if args.reapplication_cooldown_months < 1:
+        raise ValueError("--reapplication-cooldown-months must be >= 1.")
     if not np.isfinite(args.annual_interest_rate) or args.annual_interest_rate < 0:
         raise ValueError("--annual-interest-rate must be finite and non-negative")
     if not 4 <= args.default_collection_lag_months <= 12:
