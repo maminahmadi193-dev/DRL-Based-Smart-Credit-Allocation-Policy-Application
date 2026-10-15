@@ -16,15 +16,16 @@ class RewardEngine:
         scale_access_rewards_by_coverage=False,
     ):
 
+        if not np.isfinite(risk_weight) or risk_weight < 0.0:
+            raise ValueError("risk_weight must be finite and non-negative.")
+        if not np.isfinite(default_cost) or default_cost < 0.0:
+            raise ValueError("default_cost must be finite and non-negative.")
+
         self.history_reward = history_reward
-
         self.facility_weight = facility_weight
-
         self.need_weight = need_weight
-
-        self.risk_weight = risk_weight
-
-        self.default_cost = default_cost
+        self.risk_weight = float(risk_weight)
+        self.default_cost = float(default_cost)
 
         self.facility_decay = facility_decay
 
