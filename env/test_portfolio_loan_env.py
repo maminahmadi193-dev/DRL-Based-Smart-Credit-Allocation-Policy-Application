@@ -780,6 +780,41 @@ class TestPortfolioLoanEnv(unittest.TestCase):
         self.assertEqual(env.reapplications_seen, 0)
         env.close()
 
+    def test_reapplication_respects_configured_three_month_cooldown(self):
+        env = make_env(
+            applicants_per_month=2,
+            origination_months=4,
+            loan_term_months=2,
+            reapplication_share=1.0,
+            reapplication_cooldown_months=3,
+            max_hazard=0.0,
+        )
+        env.reset(seed=74)
+        month_one = set(int(idx) for idx in env.current_cohort_indices)
+
+        def advance_to_next_allocation_month():
+            cohort_size = len(env.current_cohort_indices)
+            for _ in range(cohort_size):
+                env.step(0)
+            self.assertEqual(env.phase, "transition")
+            env.step(0)
+            self.assertEqual(env.phase, "allocation")
+
+        advance_to_next_allocation_month()
+        month_two = set(int(idx) for idx in env.current_cohort_indices)
+        self.assertTrue(month_one.isdisjoint(month_two))
+
+        advance_to_next_allocation_month()
+        month_three = set(int(idx) for idx in env.current_cohort_indices)
+        self.assertTrue(month_one.isdisjoint(month_three))
+
+        # Month 4 is three checkpoints after the original applications.
+        advance_to_next_allocation_month()
+        month_four = set(int(idx) for idx in env.current_cohort_indices)
+        self.assertEqual(month_four, month_one)
+        self.assertTrue(env.current_is_reapplication)
+        env.close()
+
     def test_eligible_customer_can_reapply_while_loan_is_active(self):
         env = make_env(
             initial_budget=500_000_000,
