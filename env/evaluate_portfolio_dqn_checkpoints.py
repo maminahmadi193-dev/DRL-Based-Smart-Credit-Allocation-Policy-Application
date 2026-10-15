@@ -52,9 +52,9 @@ def main():
 
     with config_path.open("r", encoding="utf-8") as config_file:
         config = json.load(config_file)
-    if int(config.get("environment_model_version", 1)) < 5:
+    if int(config.get("environment_model_version", 1)) < 6:
         raise ValueError(
-            "This run predates the configurable reapplication process. "
+            "This run predates the applicant-history observation schema. "
             "Retrain with the current env/train_portfolio_dqn.py first."
         )
 
