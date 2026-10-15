@@ -198,6 +198,105 @@ class TestPortfolioSimulator(unittest.TestCase):
         self.assertAlmostEqual(portfolio.cumulative_net_default_loss, 0.0)
         self.assertAlmostEqual(portfolio.available_budget, 1_000_000)
 
+    def test_debt_per_loan_never_becomes_negative_and_new_small_loan_does_not_lower_risk(self):
+        simulator = CustomerSimulator()
+        customer = make_customer()
+        customer.debt = 200_000
+        customer.origin_amount = 400_000
+        customer.loan_count = 2
+        customer.debt_ratio = 0.5
+        customer.debt_per_loan = 100_000
+
+        updated = simulator._update_customer_state(
+            customer,
+            approved_unsecured_amount=50_000,
+        )
+        updated_risk = simulator._update_risk(
+            customer=updated,
+            previous_customer=customer,
+            approved_unsecured_amount=50_000,
+        )
+
+        self.assertGreaterEqual(updated.debt_per_loan, 0.0)
+        self.assertGreaterEqual(updated.debt_ratio, 0.0)
+        self.assertGreaterEqual(updated_risk, customer.risk)
+
+    def test_customer_state_persists_across_repeat_loans_and_risk_falls_with_repayment(self):
+        portfolio = make_portfolio(
+            budget=1_000_000,
+            term=3,
+            rate=0.0,
+            max_hazard=0.005,
+        )
+        customer_id = 7
+        initial = make_customer()
+        portfolio.advance_month()
+        first = portfolio.grant_loan(initial, 300_000, customer_id=customer_id)
+
+        initial_risk = portfolio.get_customer_state(customer_id).risk
+        self.assertGreater(initial_risk, initial.risk)
+        first_hazard = first.monthly_hazard
+
+        # First repayment lowers outstanding principal and refreshes risk/hazard.
+        portfolio.advance_month()
+        after_payment = portfolio.register_customer(customer_id, make_customer())
+        self.assertAlmostEqual(after_payment.debt, 200_000)
+        self.assertEqual(after_payment.loan_count, 1)
+        self.assertEqual(after_payment.origin_amount, 300_000)
+        self.assertGreaterEqual(after_payment.debt_per_loan, 0.0)
+        self.assertLess(after_payment.risk, initial_risk)
+        self.assertLess(first.monthly_hazard, first_hazard)
+
+        # Reappearing source rows must return the persistent state, not a fresh
+        # baseline with zero simulated debt.
+        second = portfolio.grant_loan(after_payment, 100_000, customer_id=customer_id)
+        after_second_loan = portfolio.get_customer_state(customer_id)
+        self.assertEqual(len([
+            loan for loan in portfolio.contracts
+            if loan.customer_id == customer_id
+        ]), 2)
+        self.assertEqual(after_second_loan.loan_count, 2)
+        self.assertEqual(after_second_loan.origin_amount, 400_000)
+        self.assertAlmostEqual(after_second_loan.debt, 300_000)
+        self.assertGreater(after_second_loan.risk, after_payment.risk)
+        self.assertGreaterEqual(second.risk_loading, 0.0)
+
+        # Another successful repayment reduces aggregate exposure and risk again.
+        risk_after_second_origination = after_second_loan.risk
+        portfolio.advance_month()
+        self.assertLess(
+            portfolio.get_customer_state(customer_id).risk,
+            risk_after_second_origination,
+        )
+
+    def test_missed_principal_remains_customer_debt_until_late_collection(self):
+        portfolio = make_portfolio(
+            budget=1_000_000,
+            term=1,
+            rate=0.0,
+            collection_lag=4,
+            max_hazard=1_000.0,
+        )
+        customer_id = 9
+        portfolio.advance_month()
+        portfolio.grant_loan(make_customer(), 100_000, customer_id=customer_id)
+
+        # Month 2 misses the only installment. The scheduled contract matures,
+        # but the unpaid principal remains in the customer ledger as a receivable.
+        portfolio.advance_month()
+        customer = portfolio.get_customer_state(customer_id)
+        self.assertAlmostEqual(customer.debt, 100_000)
+        self.assertGreaterEqual(customer.debt_per_loan, 0.0)
+
+        # By month 6 the delayed amount is collected and no simulated debt remains.
+        for _ in range(4):
+            portfolio.advance_month()
+        customer = portfolio.get_customer_state(customer_id)
+        self.assertAlmostEqual(customer.debt, 0.0)
+        self.assertAlmostEqual(customer.debt_per_loan, 0.0)
+        self.assertTrue(portfolio.contracts[0].default_recognized)
+        self.assertTrue(portfolio.contracts[0].late_payment_collected)
+
     def test_twelve_month_collection_lag_extends_settlement_after_maturity(self):
         portfolio = make_portfolio(
             budget=1_000_000,
