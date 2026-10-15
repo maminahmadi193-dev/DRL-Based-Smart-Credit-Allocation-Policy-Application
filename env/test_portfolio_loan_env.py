@@ -218,7 +218,15 @@ class TestPortfolioLoanEnv(unittest.TestCase):
             1,
         )
 
-        # One final allocation cohort has finished.
+        # Allocation is now complete for month 1, but time has not advanced.
+        self.assertEqual(env.portfolio.month, 1)
+        self.assertEqual(env.phase, "transition")
+        self.assertFalse(terminated)
+
+        # The independent transition step services loans and then starts
+        # settlement because this was the final origination month.
+        _, _, terminated, _, transition_info = env.step(0)
+        self.assertTrue(transition_info["action_ignored"])
         self.assertEqual(env.portfolio.month, 2)
         self.assertEqual(env.phase, "settlement")
         self.assertFalse(terminated)
@@ -234,18 +242,21 @@ class TestPortfolioLoanEnv(unittest.TestCase):
 
         # Zero-loan actions isolate the calendar logic
         # from loan cash flows.
-        for expected_allocation_month in (1, 2):
-            _, _, terminated, _, info = env.step(0)
-
+        for expected_month in (1, 2, 3):
+            _, _, terminated, _, allocation_info = env.step(0)
             self.assertFalse(terminated)
-            self.assertEqual(info["month"], expected_allocation_month + 1)
-            self.assertEqual(env.phase, "allocation")
+            self.assertEqual(env.phase, "transition")
+            self.assertEqual(env.portfolio.month, expected_month)
 
-        _, _, terminated, _, info = env.step(0)
+            _, _, terminated, _, transition_info = env.step(0)
+            self.assertEqual(transition_info["month"], expected_month + 1)
 
-        self.assertTrue(terminated)
-        self.assertEqual(info["month"], 4)
-        self.assertEqual(env.phase, "settlement")
+            if expected_month < 3:
+                self.assertFalse(terminated)
+                self.assertEqual(env.phase, "allocation")
+            else:
+                self.assertTrue(terminated)
+                self.assertEqual(env.phase, "settlement")
 
     def test_settlement_continues_until_contract_matures(self):
         env = make_env(
@@ -262,17 +273,19 @@ class TestPortfolioLoanEnv(unittest.TestCase):
 
         self.assertFalse(terminated)
         self.assertEqual(info["approved_amount"], 100_000_000)
+        self.assertEqual(env.phase, "transition")
+        self.assertEqual(env.portfolio.month, 1)
+
+        # First advance the clock and apply the first installment.
+        _, _, terminated, _, transition_info = env.step(0)
+        self.assertTrue(transition_info["action_ignored"])
         self.assertEqual(env.phase, "settlement")
         self.assertEqual(env.portfolio.month, 2)
-        self.assertGreater(
-            env.portfolio.active_contract_count,
-            0,
-        )
+        self.assertGreater(env.portfolio.active_contract_count, 0)
 
-        # During settlement the action is ignored, but the
-        # outstanding contract must continue being serviced.
+        # During settlement the action is ignored, but the remaining
+        # installment must still be serviced.
         _, _, terminated, _, info = env.step(5)
-
         self.assertTrue(info["action_ignored"])
         self.assertTrue(terminated)
         self.assertEqual(env.portfolio.month, 3)
@@ -313,10 +326,14 @@ class TestPortfolioLoanEnv(unittest.TestCase):
         _, _, terminated, _, info = env.step(1)
 
         self.assertFalse(terminated)
+        self.assertEqual(env.portfolio.month, 1)
+        self.assertEqual(env.phase, "transition")
+
+        # Monthly transition now collects the first installment separately.
+        _, _, terminated, _, info = env.step(0)
+        self.assertFalse(terminated)
         self.assertEqual(env.portfolio.month, 2)
         self.assertEqual(env.phase, "allocation")
-
-        # Month 1 loans have made their first instalments.
         self.assertAlmostEqual(
             env.portfolio.available_budget,
             300_000_000,
@@ -337,6 +354,11 @@ class TestPortfolioLoanEnv(unittest.TestCase):
 
         _, _, terminated, _, info = env.step(1)
 
+        self.assertFalse(terminated)
+        self.assertEqual(env.portfolio.month, 2)
+        self.assertEqual(env.phase, "transition")
+
+        _, _, terminated, _, info = env.step(0)
         self.assertFalse(terminated)
         self.assertEqual(env.portfolio.month, 3)
         self.assertEqual(env.phase, "settlement")
@@ -411,18 +433,30 @@ class TestPortfolioLoanEnv(unittest.TestCase):
                 initial_obs.shape,
                 (CustomerState.FEATURE_COUNT + env.PORTFOLIO_FEATURE_COUNT,),
             )
-            self.assertEqual(env.PORTFOLIO_FEATURE_COUNT, 28)
+            self.assertEqual(env.PORTFOLIO_FEATURE_COUNT, 29)
             self.assertAlmostEqual(
                 float(initial_obs[CustomerState.FEATURE_COUNT + 3]),
                 len(env.current_cohort_indices) / env.max_applicants_per_month,
             )
             sizes = []
 
-            while env.phase == "allocation":
-                cohort_size = len(env.current_cohort_indices)
-                sizes.append(cohort_size)
-                for _ in range(cohort_size):
-                    _, _, _, _, _ = env.step(0)
+            while not env.episode_done:
+                if env.phase == "allocation":
+                    cohort_size = len(env.current_cohort_indices)
+                    sizes.append(cohort_size)
+                    for _ in range(cohort_size):
+                        _, _, _, _, _ = env.step(0)
+                    self.assertEqual(env.phase, "transition")
+
+                elif env.phase == "transition":
+                    _, _, terminated, _, _ = env.step(0)
+                    if terminated:
+                        break
+
+                elif env.phase == "settlement":
+                    _, _, terminated, _, _ = env.step(0)
+                    if terminated:
+                        break
 
             self.assertEqual(env.total_applicants_seen, sum(sizes))
             env.close()
@@ -469,12 +503,15 @@ class TestPortfolioLoanEnv(unittest.TestCase):
         _, _, terminated, _, info = env.step(1)
 
         self.assertFalse(terminated)
+        self.assertEqual(env.phase, "transition")
         self.assertAlmostEqual(env.annual_interest_rate, 0.04)
         self.assertAlmostEqual(env.monthly_interest_rate, 0.04 / 12.0)
         self.assertAlmostEqual(
             env.portfolio.contracts[0].monthly_interest_rate,
             0.04 / 12.0,
         )
+
+        _, _, terminated, _, info = env.step(0)
         self.assertGreater(info["interest_collected"], 0.0)
 
     def test_one_year_origination_then_settlement_to_longest_maturity(self):
@@ -489,9 +526,16 @@ class TestPortfolioLoanEnv(unittest.TestCase):
         initial_cash = env.portfolio.available_budget
 
         # One new 100M loan in each of the 12 origination months.
-        for _ in range(12):
+        for month in range(1, 13):
             _, _, terminated, _, info = env.step(1)
             self.assertFalse(terminated)
+            self.assertEqual(env.phase, "transition")
+            self.assertEqual(env.portfolio.month, month)
+
+            _, _, terminated, _, info = env.step(0)
+            if month < 12:
+                self.assertFalse(terminated)
+                self.assertEqual(env.phase, "allocation")
 
         self.assertEqual(len(env.portfolio.contracts), 12)
         self.assertEqual(env.phase, "settlement")
@@ -535,9 +579,10 @@ class TestPortfolioLoanEnv(unittest.TestCase):
         self.assertTrue(env.observation_space.contains(observation))
         check_env(env, skip_render_check=True)
 
-        # The last 12 entries of the portfolio feature block describe
-        # expected receipts due 1..12 months from now; a new episode is empty.
-        delay_start = CustomerState.FEATURE_COUNT + 12
+        # The current portfolio summary has 13 non-delay entries in variable
+        # cohort mode (including the transition flag), followed by 12 delay
+        # forecasts and the 4 applicant-queue summary features.
+        delay_start = CustomerState.FEATURE_COUNT + 13
         delay_schedule = observation[delay_start:delay_start + 12]
         self.assertEqual(len(delay_schedule), 12)
         np.testing.assert_allclose(delay_schedule, np.zeros(12), atol=1e-7)
@@ -560,40 +605,48 @@ class TestPortfolioLoanEnv(unittest.TestCase):
             observation.shape,
             (CustomerState.FEATURE_COUNT + env.PORTFOLIO_FEATURE_COUNT,),
         )
-        self.assertEqual(env.PORTFOLIO_FEATURE_COUNT, 27)
+        self.assertEqual(env.PORTFOLIO_FEATURE_COUNT, 28)
         self.assertTrue(env.observation_space.contains(observation))
         initial_cash = env.portfolio.available_budget
 
-        # Grant one loan. The first installment is forced to be fully missed.
+        # Grant one loan. Payment processing occurs only on the following
+        # transition step, not as part of the applicant's action.
         observation_1, reward_1, terminated, _, info_1 = env.step(1)
         self.assertFalse(terminated)
         self.assertTrue(env.observation_space.contains(observation_1))
-        self.assertEqual(env.phase, "settlement")
-        # A forced missed installment is not yet a recognized default (>90 DPD),
-        # so the 10-point penalty must not be applied at origination/first miss.
-        self.assertEqual(info_1["default_penalty"], 0.0)
-        self.assertAlmostEqual(info_1["principal_collected"], 0.0)
-        self.assertAlmostEqual(info_1["interest_collected"], 0.0)
-        self.assertEqual(info_1["missed_installment_count"], 1.0)
-        self.assertGreater(info_1["delayed_payment_amount_scheduled"], 0.0)
-        self.assertGreater(info_1["pending_delayed_receivables"], 0.0)
-        self.assertAlmostEqual(info_1["net_default_loss"], 0.0)
+        self.assertEqual(env.phase, "transition")
+        self.assertEqual(env.portfolio.month, 1)
         self.assertTrue(np.isfinite(reward_1))
 
-        # Month 3: the only later installment is paid on time. The first missed
-        # installment remains queued and is not fractionally collected.
-        _, reward_2, terminated, _, info_2 = env.step(0)
+        # Month 2: the installment is forced to be fully missed. Since this is
+        # the first miss, no recognized-default penalty has been applied yet.
+        observation_2, reward_2, terminated, _, info_2 = env.step(0)
         self.assertFalse(terminated)
-        self.assertTrue(info_2["action_ignored"])
-        self.assertTrue(np.isfinite(reward_2))
-        self.assertEqual(info_2["delayed_payment_amount_scheduled"], 0.0)
-        self.assertAlmostEqual(info_2["delayed_payment_amount_collected"], 0.0)
+        self.assertTrue(env.observation_space.contains(observation_2))
+        self.assertEqual(env.phase, "settlement")
+        self.assertEqual(env.portfolio.month, 2)
+        self.assertEqual(info_2["default_penalty"], 0.0)
+        self.assertAlmostEqual(info_2["principal_collected"], 0.0)
+        self.assertAlmostEqual(info_2["interest_collected"], 0.0)
+        self.assertEqual(info_2["missed_installment_count"], 1.0)
+        self.assertGreater(info_2["delayed_payment_amount_scheduled"], 0.0)
         self.assertGreater(info_2["pending_delayed_receivables"], 0.0)
+        self.assertAlmostEqual(info_2["net_default_loss"], 0.0)
+        self.assertTrue(np.isfinite(reward_2))
 
-        # Month 4 and 5 stay unsettled; month 6 recognizes >90 DPD and fully
-        # collects the overdue installment, leaving no permanent credit loss.
+        # Month 3: remaining installment is paid on time, but the overdue
+        # installment remains outstanding and is not fractionally collected.
+        _, _, terminated, _, info_3 = env.step(0)
+        self.assertFalse(terminated)
+        self.assertEqual(env.portfolio.month, 3)
+        self.assertTrue(info_3["action_ignored"])
+        self.assertEqual(info_3["delayed_payment_amount_scheduled"], 0.0)
+        self.assertAlmostEqual(info_3["delayed_payment_amount_collected"], 0.0)
+        self.assertGreater(info_3["pending_delayed_receivables"], 0.0)
+
+        # Months 4 and 5 continue settlement; month 6 recognizes >90 DPD.
         for month in (4, 5):
-            _, _, terminated, _, _ = env.step(0)
+            _, _, terminated, _, info = env.step(0)
             self.assertFalse(terminated)
             self.assertEqual(env.portfolio.month, month)
         _, reward_6, terminated, _, info_6 = env.step(0)
@@ -668,6 +721,12 @@ class TestPortfolioLoanEnv(unittest.TestCase):
 
         _, _, terminated, _, info = env.step(1)
 
+        self.assertFalse(terminated)
+        self.assertEqual(env.phase, "transition")
+        self.assertEqual(env.portfolio.month, 1)
+
+        # First transition triggers the missed installment, then begins settlement.
+        _, _, terminated, _, info = env.step(0)
         self.assertFalse(terminated)
         self.assertEqual(env.phase, "settlement")
         self.assertEqual(env.portfolio.month, 2)
