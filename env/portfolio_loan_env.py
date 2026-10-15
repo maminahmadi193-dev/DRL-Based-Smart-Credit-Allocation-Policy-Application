@@ -336,7 +336,10 @@ class PortfolioLoanEnv(gym.Env):
             [
                 idx
                 for idx, last_month in self.last_application_month.items()
-                if month - last_month >= self.reapplication_cooldown_months
+                if (
+                    month - last_month >= self.reapplication_cooldown_months
+                    and not self.portfolio.has_unresolved_overdue(idx)
+                )
             ],
             dtype=int,
         )
