@@ -155,6 +155,8 @@ def evaluate_episode(run_name, model, config, raw_df, scaler, episode, seed):
         "episode": episode,
         "seed": seed,
         "split": config.get("evaluation_split", "test"),
+        "reapplication_share": float(config.get("reapplication_share", 0.10)),
+        "reapplication_cooldown_months": int(config.get("reapplication_cooldown_months", 3)),
         "total_reward_as_trained": total_reward_as_trained,
         "total_reward_under_legacy_formula": total_reward_legacy,
         "total_reward_under_amount_sensitive_formula": total_reward_experimental,
