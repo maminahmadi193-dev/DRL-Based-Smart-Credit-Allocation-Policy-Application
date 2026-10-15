@@ -165,7 +165,14 @@ class RewardEngine:
             self,
             outcome: SimulationOutcome
         ) -> float:
-        return self.recognized_default_penalty(float(bool(outcome.default_event)))
+        """
+        A sampled term-PD event at origination is not a recognized default.
+
+        Portfolio-mode default_cost is charged only by the environment when
+        PortfolioSimulator reports a newly recognized >DPD-threshold event.
+        This compatibility method therefore intentionally applies no penalty.
+        """
+        return 0.0
     
     def _risk_cost(
             self,
@@ -212,13 +219,7 @@ class RewardEngine:
             outcome
         )
 
-        expected_default_penalty = (
-            self.default_cost
-            * outcome.probability_of_default
-        )
-
-        return (
-            social_reward
-            - risk_penalty
-            - expected_default_penalty
-        )
+        # Do not turn a term-level probability into an immediate default
+        # penalty. The portfolio environment applies default_cost only when
+        # the loan simulator actually registers a default event.
+        return social_reward - risk_penalty
