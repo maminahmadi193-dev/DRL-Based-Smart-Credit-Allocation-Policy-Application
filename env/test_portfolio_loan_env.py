@@ -604,9 +604,7 @@ class TestPortfolioLoanEnv(unittest.TestCase):
         self.assertEqual(info_6["default_penalty"], 10.0)
         self.assertAlmostEqual(
             reward_6,
-            env._financial_reward(env.portfolio and type("Monthly", (), {
-                "financial_pnl": info_6["financial_pnl"]
-            })()) - 10.0,
+            info_6["financial_pnl"] / env.financial_reward_scale - 10.0,
         )
         self.assertEqual(info_6["missed_installment_count"], 0.0)
         self.assertGreater(info_6["delayed_payment_amount_collected"], 0.0)
