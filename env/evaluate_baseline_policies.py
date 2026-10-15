@@ -83,6 +83,8 @@ POLICIES = (
 METRICS = (
     "total_reward",
     "social_reward",
+    "risk_penalty",
+    "default_penalty",
     "financial_pnl",
     "interest_collected",
     "net_default_loss",
@@ -282,6 +284,8 @@ def evaluate_one_episode(policy: str, episode: int, seed: int, df: pd.DataFrame,
     rng = np.random.default_rng(seed + 100_003)
     total_reward = 0.0
     social_reward = 0.0
+    risk_penalty = 0.0
+    default_penalty = 0.0
     financial_pnl = 0.0
     interest_collected = 0.0
     net_default_loss = 0.0
@@ -302,6 +306,8 @@ def evaluate_one_episode(policy: str, episode: int, seed: int, df: pd.DataFrame,
 
         total_reward += float(reward)
         social_reward += float(info.get("social_reward", 0.0))
+        risk_penalty += float(info.get("risk_penalty", 0.0))
+        default_penalty += float(info.get("default_penalty", 0.0))
         financial_pnl += float(info.get("financial_pnl", 0.0))
         interest_collected += float(info.get("interest_collected", 0.0))
         net_default_loss += float(info.get("net_default_loss", 0.0))
@@ -329,6 +335,8 @@ def evaluate_one_episode(policy: str, episode: int, seed: int, df: pd.DataFrame,
         "dataset_rows": len(df),
         "total_reward": total_reward,
         "social_reward": social_reward,
+        "risk_penalty": risk_penalty,
+        "default_penalty": default_penalty,
         "financial_pnl": financial_pnl,
         "interest_collected": float(portfolio.cumulative_interest_collected),
         "net_default_loss": float(portfolio.cumulative_net_default_loss),
