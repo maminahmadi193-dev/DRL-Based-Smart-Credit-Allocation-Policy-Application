@@ -409,6 +409,11 @@ class PortfolioSimulator:
             0.0, float(baseline.origin_amount)
         ) + cumulative_new_originations
         current.loan_count = max(0, int(baseline.loan_count)) + len(contracts)
+        # Once the customer receives a simulated contract, they are no longer
+        # new-to-credit for this portfolio, even after that loan matures.
+        current.has_no_history = bool(
+            baseline.has_no_history and len(contracts) == 0
+        )
 
         current.debt_ratio = (
             current.debt / current.origin_amount
