@@ -361,6 +361,20 @@ class PortfolioSimulator:
         state = self.customer_states.get(key)
         return None if state is None else state.copy()
 
+    def has_unresolved_overdue(self, customer_id: CustomerId) -> bool:
+        """
+        Return whether any contract for this customer has an unpaid missed installment.
+
+        An active loan alone does not block a new application. An installment
+        that was missed and has not yet been collected does block reapplication.
+        """
+        key = self._resolve_customer_key(customer_id)
+        return any(
+            contract.missed_installment_occurred
+            and not contract.late_payment_collected
+            for contract in self.contracts_by_customer.get(key, [])
+        )
+
     def _contract_customer_exposure(self, contract: LoanContract) -> float:
         """
         Principal still owed by this customer on one contract.
