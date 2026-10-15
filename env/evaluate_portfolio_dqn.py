@@ -74,6 +74,8 @@ def evaluate_episode(run_name, model, config, raw_df, scaler, episode, seed):
     action_counts = np.zeros(len(env.ACTION_AMOUNTS), dtype=np.int64)
     approved_action_counts = np.zeros(len(env.ACTION_AMOUNTS), dtype=np.int64)
     invalid_actions = 0
+    total_risk_penalty = 0.0
+    total_recognized_default_penalty = 0.0
 
     max_steps = (
         env.max_applicants_per_month * env.origination_months
@@ -94,6 +96,8 @@ def evaluate_episode(run_name, model, config, raw_df, scaler, episode, seed):
 
         obs, reward, terminated, truncated, info = env.step(action)
         total_reward_as_trained += float(reward)
+        total_risk_penalty += float(info.get("risk_penalty", 0.0))
+        total_recognized_default_penalty += float(info.get("default_penalty", 0.0))
 
         if "action_index" in info:
             action_index = int(info["action_index"])
@@ -126,15 +130,20 @@ def evaluate_episode(run_name, model, config, raw_df, scaler, episode, seed):
     financial_scale = float(config["financial_reward_scale"])
     invalid_penalty = float(config["invalid_action_penalty"])
 
-    total_reward_legacy = (
-        social_weight * total_legacy_social
-        + financial_weight * financial_pnl / financial_scale
+    # Both counterfactual social modes share the realized risk/default costs
+    # and financial cashflows from this episode. This matches the new reward
+    # structure without charging expected PD as an immediate default penalty.
+    shared_non_social_reward = (
+        financial_weight * financial_pnl / financial_scale
+        - total_risk_penalty
+        - total_recognized_default_penalty
         - invalid_penalty * invalid_actions
     )
+    total_reward_legacy = (
+        social_weight * total_legacy_social + shared_non_social_reward
+    )
     total_reward_experimental = (
-        social_weight * total_experimental_social
-        + financial_weight * financial_pnl / financial_scale
-        - invalid_penalty * invalid_actions
+        social_weight * total_experimental_social + shared_non_social_reward
     )
 
     result = {
@@ -149,6 +158,8 @@ def evaluate_episode(run_name, model, config, raw_df, scaler, episode, seed):
         "social_reward_legacy": total_legacy_social,
         "social_reward_amount_sensitive": total_experimental_social,
         "financial_pnl": financial_pnl,
+        "total_risk_penalty": total_risk_penalty,
+        "total_recognized_default_penalty": total_recognized_default_penalty,
         "interest_collected": float(portfolio.cumulative_interest_collected),
         "net_default_loss": float(portfolio.cumulative_net_default_loss),
         "expected_default_count": float(portfolio.cumulative_expected_defaults),
@@ -213,11 +224,11 @@ def main():
             )
         with config_path.open("r", encoding="utf-8") as f:
             config = json.load(f)
-        if int(config.get("environment_model_version", 1)) < 3:
+        if int(config.get("environment_model_version", 1)) < 4:
             raise ValueError(
-                f"Model {run_name} predates population-calibrated hazard dynamics. "
-                "Retrain it with env/train_portfolio_dqn.py so the saved hazard "
-                "calibration is used during evaluation."
+                f"Model {run_name} predates persistent customer state and explicit "
+                "monthly transition dynamics. Retrain it with env/train_portfolio_dqn.py "
+                "before evaluation in this environment."
             )
         run_configs[run_name] = config
 
