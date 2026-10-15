@@ -745,6 +745,101 @@ class TestPortfolioLoanEnv(unittest.TestCase):
         self.assertAlmostEqual(env.portfolio.available_budget, 100_000_000)
         env.close()
 
+    def test_first_time_applicants_are_unique_across_episode(self):
+        env = make_env(
+            applicants_per_month=4,
+            origination_months=3,
+            loan_term_months=2,
+            reapplication_share=0.0,
+            reapplication_cooldown_months=1,
+            max_hazard=0.0,
+        )
+        env.reset(seed=71)
+        episode_customer_indices = set()
+
+        for month_index in range(3):
+            cohort = [int(idx) for idx in env.current_cohort_indices]
+            self.assertEqual(len(cohort), len(set(cohort)))
+            self.assertTrue(
+                episode_customer_indices.isdisjoint(cohort),
+                "A first-time applicant must not be sampled again when reapplications are disabled.",
+            )
+            episode_customer_indices.update(cohort)
+
+            for _ in cohort:
+                _, _, terminated, _, _ = env.step(0)
+                self.assertFalse(terminated)
+
+            if month_index < 2:
+                self.assertEqual(env.phase, "transition")
+                _, _, terminated, _, _ = env.step(0)
+                self.assertFalse(terminated)
+                self.assertEqual(env.phase, "allocation")
+
+        self.assertEqual(env.new_applicants_seen, 12)
+        self.assertEqual(env.reapplications_seen, 0)
+        env.close()
+
+    def test_eligible_customer_can_reapply_while_loan_is_active(self):
+        env = make_env(
+            initial_budget=500_000_000,
+            applicants_per_month=2,
+            origination_months=2,
+            loan_term_months=4,
+            reapplication_share=1.0,
+            reapplication_cooldown_months=1,
+            max_hazard=0.0,
+        )
+        env.reset(seed=72)
+        first_cohort = set(int(idx) for idx in env.current_cohort_indices)
+
+        # Two customers receive loans in month 1.
+        env.step(1)
+        env.step(1)
+        self.assertEqual(env.portfolio.active_contract_count, 2)
+        self.assertEqual(env.phase, "transition")
+
+        # At month 2, the cooldown has elapsed and no overdue installment
+        # exists, so the same two customers may reapply despite active loans.
+        env.step(0)
+        second_cohort = set(int(idx) for idx in env.current_cohort_indices)
+        self.assertEqual(second_cohort, first_cohort)
+        self.assertEqual(env.portfolio.active_contract_count, 2)
+        self.assertTrue(env.current_is_reapplication)
+        self.assertEqual(env.reapplications_seen, 1)
+        env.close()
+
+    def test_unpaid_missed_installment_blocks_reapplication(self):
+        env = make_env(
+            initial_budget=500_000_000,
+            applicants_per_month=2,
+            origination_months=2,
+            loan_term_months=4,
+            reapplication_share=1.0,
+            reapplication_cooldown_months=1,
+            max_hazard=1_000.0,
+        )
+        env.reset(seed=73)
+        first_cohort = set(int(idx) for idx in env.current_cohort_indices)
+
+        # A very high hazard deterministically forces a missed first payment
+        # at the next monthly checkpoint. The resulting overdue blocks return.
+        env.step(1)
+        env.step(1)
+        env.step(0)  # monthly transition and repayment/default-event simulation
+
+        second_cohort = set(int(idx) for idx in env.current_cohort_indices)
+        self.assertTrue(first_cohort.isdisjoint(second_cohort))
+        self.assertEqual(env.reapplications_seen, 0)
+        self.assertGreaterEqual(env.new_applicants_seen, 3)
+        self.assertTrue(
+            any(
+                env.portfolio.has_unresolved_overdue(customer_id)
+                for customer_id in first_cohort
+            )
+        )
+        env.close()
+
     def test_gymnasium_environment_checker(self):
         env = make_env(
             applicants_per_month=2,
