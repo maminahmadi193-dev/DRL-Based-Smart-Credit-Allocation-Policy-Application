@@ -205,6 +205,7 @@ class PortfolioSimulator:
         # derived balances and risk without double-counting monthly updates.
         self.customer_baselines: dict[CustomerId, CustomerState] = {}
         self.customer_states: dict[CustomerId, CustomerState] = {}
+        self.contracts_by_customer: dict[CustomerId, list[LoanContract]] = {}
 
         self.total_disbursed = 0.0
         self.cumulative_expected_defaults = 0.0  # Compatibility alias for old reports.
@@ -380,10 +381,7 @@ class PortfolioSimulator:
         if baseline is None:
             return None
 
-        contracts = [
-            contract for contract in self.contracts
-            if contract.customer_id == key
-        ]
+        contracts = self.contracts_by_customer.get(key, [])
         current = baseline.copy()
 
         cumulative_new_originations = sum(
@@ -451,7 +449,9 @@ class PortfolioSimulator:
         return current.copy()
 
     def _refresh_all_customer_states(self) -> None:
-        for customer_id in list(self.customer_baselines):
+        # Customers without simulated loans remain at their normalized baseline.
+        # Only identities with contracts can have changed due to the portfolio.
+        for customer_id in list(self.contracts_by_customer):
             self._refresh_customer_state(customer_id)
 
     def can_fund(self, amount: float) -> bool:
@@ -567,6 +567,7 @@ class PortfolioSimulator:
 
         self.next_loan_id += 1
         self.contracts.append(contract)
+        self.contracts_by_customer.setdefault(key, []).append(contract)
 
         self.cash_available = max(
             0.0,
