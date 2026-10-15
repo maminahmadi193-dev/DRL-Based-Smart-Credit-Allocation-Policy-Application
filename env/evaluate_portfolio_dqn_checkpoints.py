@@ -172,9 +172,19 @@ def main():
     summary_output = output_dir / f"{args.run_name}_{args.split}_convergence.csv"
     pd.DataFrame(episode_rows).to_csv(episode_output, index=False)
     summary_df = pd.DataFrame(summary_rows).sort_values("checkpoint_steps")
+    best_index = summary_df["mean_total_reward_as_trained"].idxmax()
+    summary_df["best_by_validation_mean_reward"] = False
+    summary_df.loc[best_index, "best_by_validation_mean_reward"] = True
     summary_df.to_csv(summary_output, index=False)
 
+    best_row = summary_df.loc[best_index]
     print()
+    print(
+        "Highest mean reward on the selected split: "
+        f"{int(best_row['checkpoint_steps']):,} steps "
+        f"(mean={best_row['mean_total_reward_as_trained']:.3f})."
+    )
+    print("Use validation as the selection split; reserve test results for final reporting.")
     print("Saved:")
     print(f"  Episode details: {episode_output}")
     print(f"  Convergence:     {summary_output}")
