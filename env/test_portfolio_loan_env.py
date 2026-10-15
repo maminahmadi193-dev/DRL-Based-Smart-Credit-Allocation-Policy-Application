@@ -433,7 +433,7 @@ class TestPortfolioLoanEnv(unittest.TestCase):
                 initial_obs.shape,
                 (CustomerState.FEATURE_COUNT + env.PORTFOLIO_FEATURE_COUNT,),
             )
-            self.assertEqual(env.PORTFOLIO_FEATURE_COUNT, 29)
+            self.assertEqual(env.PORTFOLIO_FEATURE_COUNT, 31)
             self.assertAlmostEqual(
                 float(initial_obs[CustomerState.FEATURE_COUNT + 3]),
                 len(env.current_cohort_indices) / env.max_applicants_per_month,
@@ -571,7 +571,7 @@ class TestPortfolioLoanEnv(unittest.TestCase):
         )
         observation, _ = env.reset(seed=123)
 
-        self.assertEqual(env.PORTFOLIO_FEATURE_COUNT, 29)
+        self.assertEqual(env.PORTFOLIO_FEATURE_COUNT, 31)
         self.assertEqual(
             observation.shape,
             (CustomerState.FEATURE_COUNT + env.PORTFOLIO_FEATURE_COUNT,),
@@ -582,7 +582,7 @@ class TestPortfolioLoanEnv(unittest.TestCase):
         # The current portfolio summary has 13 non-delay entries in variable
         # cohort mode (including the transition flag), followed by 12 delay
         # forecasts and the 4 applicant-queue summary features.
-        delay_start = CustomerState.FEATURE_COUNT + 13
+        delay_start = CustomerState.FEATURE_COUNT + 15
         delay_schedule = observation[delay_start:delay_start + 12]
         self.assertEqual(len(delay_schedule), 12)
         np.testing.assert_allclose(delay_schedule, np.zeros(12), atol=1e-7)
@@ -605,7 +605,7 @@ class TestPortfolioLoanEnv(unittest.TestCase):
             observation.shape,
             (CustomerState.FEATURE_COUNT + env.PORTFOLIO_FEATURE_COUNT,),
         )
-        self.assertEqual(env.PORTFOLIO_FEATURE_COUNT, 28)
+        self.assertEqual(env.PORTFOLIO_FEATURE_COUNT, 30)
         self.assertTrue(env.observation_space.contains(observation))
         initial_cash = env.portfolio.available_budget
 
@@ -842,6 +842,14 @@ class TestPortfolioLoanEnv(unittest.TestCase):
         self.assertEqual(env.portfolio.active_contract_count, 2)
         self.assertTrue(env.current_is_reapplication)
         self.assertEqual(env.reapplications_seen, 1)
+
+        # The policy observes both that the applicant is returning and their
+        # previous application count (fixed-cohort features start after the
+        # customer feature vector).
+        observation = env._get_observation()
+        portfolio_offset = CustomerState.FEATURE_COUNT
+        self.assertAlmostEqual(observation[portfolio_offset + 3], 1.0)
+        self.assertGreater(observation[portfolio_offset + 4], 0.0)
         env.close()
 
     def test_unpaid_missed_installment_blocks_reapplication(self):
