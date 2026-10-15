@@ -286,7 +286,7 @@ def main():
                 else "legacy"
             ),
             "environment_class": "PortfolioLoanEnv",
-            "environment_model_version": 3,
+            "environment_model_version": 4,
             "payment_model": "stochastic_full_or_zero_installment",
             "default_definition": "a missed installment is defaulted after > default_dpd_threshold_days",
             "hazard_intercept": hazard_intercept,
