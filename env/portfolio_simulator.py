@@ -10,7 +10,7 @@ from customer_state import CustomerState
 from customer_simulator import CustomerSimulator
 
 
-CustomerId = Optional[Union[str, int]]
+CustomerId = Optional[Union[str, int, tuple]]
 
 
 @dataclass
@@ -28,6 +28,10 @@ class LoanContract:
     monthly_hazard: float
     monthly_miss_probability: float
     default_probability_over_term: float
+
+    # Incremental risk loading at origination. It decays with the share of
+    # the loan's principal exposure that remains unpaid.
+    risk_loading: float
 
     term_months: int
     remaining_months: int
@@ -196,6 +200,12 @@ class PortfolioSimulator:
 
         self.contracts: list[LoanContract] = []
 
+        # Keep one evolving state per empirical customer row for the duration
+        # of an episode, plus an immutable starting point used to rebuild
+        # derived balances and risk without double-counting monthly updates.
+        self.customer_baselines: dict[CustomerId, CustomerState] = {}
+        self.customer_states: dict[CustomerId, CustomerState] = {}
+
         self.total_disbursed = 0.0
         self.cumulative_expected_defaults = 0.0  # Compatibility alias for old reports.
         self.cumulative_recognized_defaults = 0.0
@@ -296,6 +306,154 @@ class PortfolioSimulator:
         )
         return scheduled_principal + self.pending_delayed_principal
 
+    def _resolve_customer_key(self, customer_id: CustomerId) -> CustomerId:
+        # Anonymous callers get a distinct customer identity per prospective
+        # loan. The environment supplies stable row identifiers explicitly.
+        if customer_id is None:
+            return ("__anonymous_customer__", self.next_loan_id)
+        return customer_id
+
+    @staticmethod
+    def _normalize_customer_financials(customer: CustomerState) -> CustomerState:
+        """Return a copy with non-negative balances and consistent derived ratios."""
+        state = customer.copy()
+        state.debt = max(0.0, float(state.debt))
+        state.origin_amount = max(0.0, float(state.origin_amount))
+        state.loan_count = max(0, int(state.loan_count))
+        state.debt_ratio = (
+            state.debt / state.origin_amount
+            if state.origin_amount > 0.0
+            else 0.0
+        )
+        state.debt_per_loan = (
+            state.debt / state.loan_count
+            if state.loan_count > 0
+            else 0.0
+        )
+        state.debt_ratio = max(0.0, float(state.debt_ratio))
+        state.debt_per_loan = max(0.0, float(state.debt_per_loan))
+        state.risk = float(np.clip(float(state.risk), 0.0, 100.0))
+        return state
+
+    def register_customer(
+        self,
+        customer_id: CustomerId,
+        initial_state: CustomerState,
+    ) -> CustomerState:
+        """
+        Register an empirical customer once and return its latest episode state.
+
+        Repeated appearances of the same customer identifier return the
+        evolving state, not a fresh state reconstructed from the source row.
+        """
+        key = self._resolve_customer_key(customer_id)
+        if key not in self.customer_baselines:
+            baseline = self._normalize_customer_financials(initial_state)
+            self.customer_baselines[key] = baseline.copy()
+            self.customer_states[key] = baseline.copy()
+            self._refresh_customer_state(key)
+        return self.customer_states[key].copy()
+
+    def get_customer_state(self, customer_id: CustomerId) -> Optional[CustomerState]:
+        """Get a copy of the current episode state for a registered customer."""
+        key = self._resolve_customer_key(customer_id)
+        state = self.customer_states.get(key)
+        return None if state is None else state.copy()
+
+    def _contract_customer_exposure(self, contract: LoanContract) -> float:
+        """
+        Principal still owed by this customer on one contract.
+
+        The scheduled balance amortizes when an installment falls due. If that
+        installment was missed, its principal remains debt until the delayed
+        collection is actually received.
+        """
+        exposure = max(0.0, float(contract.outstanding_principal))
+        if contract.missed_installment_occurred and not contract.late_payment_collected:
+            exposure += max(0.0, float(contract.missed_principal))
+        return max(0.0, exposure)
+
+    def _refresh_customer_state(self, customer_id: CustomerId) -> Optional[CustomerState]:
+        """Rebuild current customer debt metrics and risk from all portfolio loans."""
+        key = self._resolve_customer_key(customer_id)
+        baseline = self.customer_baselines.get(key)
+        if baseline is None:
+            return None
+
+        contracts = [
+            contract for contract in self.contracts
+            if contract.customer_id == key
+        ]
+        current = baseline.copy()
+
+        cumulative_new_originations = sum(
+            max(0.0, float(contract.principal)) for contract in contracts
+        )
+        current.debt = max(0.0, float(baseline.debt)) + sum(
+            self._contract_customer_exposure(contract)
+            for contract in contracts
+        )
+        current.origin_amount = max(
+            0.0, float(baseline.origin_amount)
+        ) + cumulative_new_originations
+        current.loan_count = max(0, int(baseline.loan_count)) + len(contracts)
+
+        current.debt_ratio = (
+            current.debt / current.origin_amount
+            if current.origin_amount > 0.0
+            else 0.0
+        )
+        current.debt_per_loan = (
+            current.debt / current.loan_count
+            if current.loan_count > 0
+            else 0.0
+        )
+        current.debt_ratio = max(0.0, float(current.debt_ratio))
+        current.debt_per_loan = max(0.0, float(current.debt_per_loan))
+
+        risk_loading = 0.0
+        for contract in contracts:
+            if contract.principal <= 0.0:
+                continue
+            exposure_share = min(
+                1.0,
+                self._contract_customer_exposure(contract)
+                / float(contract.principal),
+            )
+            risk_loading += max(0.0, float(contract.risk_loading)) * exposure_share
+
+        current.risk = float(np.clip(baseline.risk + risk_loading, 0.0, 100.0))
+        self.customer_states[key] = current
+
+        # All active contracts belonging to this customer use their latest
+        # portfolio-level risk. Once a contract has missed an installment,
+        # this simulator does not generate another missed installment for it.
+        for contract in contracts:
+            if (
+                contract.status != "active"
+                or contract.remaining_months <= 0
+                or contract.missed_installment_occurred
+            ):
+                continue
+            contract.monthly_hazard = self.customer_simulator._estimate_hazard(current)
+            contract.monthly_miss_probability = (
+                self.customer_simulator._calculate_monthly_event_probability(
+                    contract.monthly_hazard
+                )
+            )
+            contract.default_probability_over_term = (
+                self.customer_simulator._calculate_default_probability(
+                    contract.monthly_hazard,
+                    horizon_months=contract.remaining_months,
+                )
+            )
+
+        return current.copy()
+
+    def _refresh_all_customer_states(self) -> None:
+        for customer_id in list(self.customer_baselines):
+            self._refresh_customer_state(customer_id)
+
     def can_fund(self, amount: float) -> bool:
         """Check whether the current portfolio can fund an action."""
         amount = float(amount)
@@ -353,26 +511,27 @@ class PortfolioSimulator:
                 f"requested={amount:,.2f}."
             )
 
-        previous_customer = customer.copy()
+        key = self._resolve_customer_key(customer_id)
+        previous_customer = self.register_customer(key, customer)
 
-        # Reuse the existing project's state-transition and risk models.
-        customer_after_loan = (
-            self.customer_simulator._update_customer_state(
-                customer=previous_customer,
-                approved_unsecured_amount=amount,
-            )
+        # Apply the existing origination risk model to the customer's latest
+        # persistent state, which already includes any previous portfolio loans.
+        customer_after_loan = self.customer_simulator._update_customer_state(
+            customer=previous_customer,
+            approved_unsecured_amount=amount,
+        )
+        customer_after_loan.risk = self.customer_simulator._update_risk(
+            customer=customer_after_loan,
+            previous_customer=previous_customer,
+            approved_unsecured_amount=amount,
+        )
+        risk_loading = max(
+            0.0,
+            float(customer_after_loan.risk) - float(previous_customer.risk),
         )
 
-        customer_after_loan.risk = (
-            self.customer_simulator._update_risk(
-                customer=customer_after_loan,
-                previous_customer=previous_customer,
-                approved_unsecured_amount=amount,
-            )
-        )
-
-        # Convert the updated customer risk to a monthly hazard and probability.
-        # PD is specific to this experiment's contractual loan term.
+        # The monthly hazard is refreshed again after the contract is registered,
+        # using the aggregated risk from all of this customer's open contracts.
         monthly_hazard = self.customer_simulator._estimate_hazard(
             customer_after_loan
         )
@@ -392,7 +551,7 @@ class PortfolioSimulator:
 
         contract = LoanContract(
             loan_id=self.next_loan_id,
-            customer_id=customer_id,
+            customer_id=key,
             origin_month=self.month,
             principal=amount,
             outstanding_principal=amount,
@@ -401,6 +560,7 @@ class PortfolioSimulator:
             monthly_hazard=monthly_hazard,
             monthly_miss_probability=monthly_miss_probability,
             default_probability_over_term=default_probability_over_term,
+            risk_loading=risk_loading,
             term_months=self.loan_term_months,
             remaining_months=self.loan_term_months,
         )
@@ -412,9 +572,9 @@ class PortfolioSimulator:
             0.0,
             self.cash_available - amount,
         )
-
         self.total_disbursed += amount
 
+        self._refresh_customer_state(key)
         return contract
 
     @staticmethod
@@ -558,6 +718,11 @@ class PortfolioSimulator:
                 contract.status = "matured"
             else:
                 contract.survival_probability = 1.0
+
+        # Repayment, delayed collection, and new arrears all alter customers'
+        # current exposure. Refresh once at the end of the monthly checkpoint
+        # so every contract uses the same monthly state snapshot.
+        self._refresh_all_customer_states()
 
         # All missed installments are collected in full; no permanent loss.
         recovery_collected = 0.0
