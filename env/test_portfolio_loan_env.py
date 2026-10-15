@@ -571,7 +571,7 @@ class TestPortfolioLoanEnv(unittest.TestCase):
         )
         observation, _ = env.reset(seed=123)
 
-        self.assertEqual(env.PORTFOLIO_FEATURE_COUNT, 28)
+        self.assertEqual(env.PORTFOLIO_FEATURE_COUNT, 29)
         self.assertEqual(
             observation.shape,
             (CustomerState.FEATURE_COUNT + env.PORTFOLIO_FEATURE_COUNT,),
