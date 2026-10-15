@@ -59,6 +59,7 @@ class CustomerSimulator:
             updated.debt += amount
             updated.origin_amount += amount
             updated.loan_count += 1
+            updated.has_no_history = False
 
         # Derived debt features are always non-negative. DebtPerLoan is based
         # on total current debt divided by the cumulative number of loans.
