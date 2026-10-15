@@ -30,7 +30,7 @@ def parse_args():
     parser.add_argument("--data", default=None)
     parser.add_argument("--episodes", type=int, default=10)
     parser.add_argument("--eval-seed", type=int, default=20_000)
-    parser.add_argument("--split", choices=["validation", "test"], default="validation")
+    parser.add_argument("--split", choices=["validation"], default="validation", help="Checkpoint selection must use validation data; keep test data for final reporting.")
     parser.add_argument(
         "--output-dir",
         default="models/results/portfolio_dqn/convergence",
