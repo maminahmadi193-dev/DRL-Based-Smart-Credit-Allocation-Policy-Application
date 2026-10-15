@@ -35,7 +35,7 @@ class PortfolioLoanEnv(gym.Env):
     metadata = {"render_modes": []}
 
     CUSTOMER_FEATURE_COUNT = CustomerState.FEATURE_COUNT
-    PORTFOLIO_FEATURE_COUNT = 15
+    PORTFOLIO_FEATURE_COUNT = 16
 
     ACTION_AMOUNTS = (
         0,
@@ -237,6 +237,7 @@ class PortfolioLoanEnv(gym.Env):
 
         self.phase = "allocation"
         self.episode_done = False
+        self._transition_after_allocation_month = None
 
         self.current_cohort_indices = np.array([], dtype=int)
         self.current_applicant_position = 0
@@ -428,9 +429,8 @@ class PortfolioLoanEnv(gym.Env):
             / max(len(self.current_cohort_indices), 1)
         )
 
-        settlement_flag = float(
-            self.phase == "settlement"
-        )
+        settlement_flag = float(self.phase == "settlement")
+        transition_flag = float(self.phase == "transition")
 
         active_contract_ratio = (
             np.log1p(self.portfolio.active_contract_count)
@@ -495,6 +495,7 @@ class PortfolioLoanEnv(gym.Env):
 
         portfolio_values.extend([
             settlement_flag,
+            transition_flag,
             active_contract_ratio,
             outstanding_ratio,
             payment_ratio,
@@ -579,6 +580,7 @@ class PortfolioLoanEnv(gym.Env):
 
         self.phase = "allocation"
         self.episode_done = False
+        self._transition_after_allocation_month = None
 
         # Start the first allocation month.
         self.portfolio.advance_month()
@@ -604,6 +606,55 @@ class PortfolioLoanEnv(gym.Env):
             raise ValueError(
                 f"Action index {action} is outside the action space."
             )
+
+        # ------------------------------------------------------
+        # Monthly transition phase: the action is ignored. The prior
+        # applicant cohort has finished; now process repayments, refresh
+        # persistent customer risks, and book any newly recognized defaults.
+        # ------------------------------------------------------
+        if self.phase == "transition":
+            monthly_result = self.portfolio.advance_month()
+            default_penalty = self.reward_engine.recognized_default_penalty(
+                monthly_result.recognized_default_count
+            )
+            reward = self._financial_reward(monthly_result) - default_penalty
+
+            allocation_month = self._transition_after_allocation_month
+            self._transition_after_allocation_month = None
+
+            if allocation_month < self.origination_months:
+                self.phase = "allocation"
+                self._load_new_cohort()
+                terminated = False
+            else:
+                self.phase = "settlement"
+                terminated = self.portfolio.is_fully_settled
+
+            truncated = False
+            self.episode_done = terminated
+            info = {
+                "phase": self.phase,
+                "action_ignored": True,
+                "transition_completed": True,
+                "month": monthly_result.month,
+                "financial_pnl": monthly_result.financial_pnl,
+                "default_penalty": default_penalty,
+                "principal_collected": monthly_result.principal_collected,
+                "interest_collected": monthly_result.interest_collected,
+                "net_default_loss": monthly_result.net_default_loss,
+                "expected_default_count": monthly_result.expected_default_count,
+                "recognized_default_count": monthly_result.recognized_default_count,
+                "missed_installment_count": monthly_result.missed_installment_count,
+                "gross_defaulted_principal": monthly_result.gross_defaulted_principal,
+                "available_budget": self.portfolio.available_budget,
+                "active_contracts": self.portfolio.active_contract_count,
+                "pending_delayed_receivables": self.portfolio.pending_delayed_receivables,
+                "delayed_payment_amount_scheduled": monthly_result.delayed_payment_amount_scheduled,
+                "delayed_payment_amount_collected": monthly_result.delayed_payment_amount_collected,
+                "expected_delayed_installments": monthly_result.expected_delayed_installments,
+                "is_fully_settled": self.portfolio.is_fully_settled,
+            }
+            return self._get_observation(), float(reward), terminated, truncated, info
 
         # ------------------------------------------------------
         # Settlement phase: no more new loans.
@@ -734,37 +785,16 @@ class PortfolioLoanEnv(gym.Env):
 
         if not cohort_finished:
             self._load_current_applicant()
-
             terminated = False
             truncated = False
-
         else:
-            # Remember which allocation month has just finished.
-            allocation_month = self.portfolio.month
-
-            # Advance the calendar and service existing loans.
-            monthly_result = self.portfolio.advance_month()
-
-            default_penalty = self.reward_engine.recognized_default_penalty(
-                monthly_result.recognized_default_count
-            )
-            reward += self._financial_reward(monthly_result) - default_penalty
-
-            # Continue allocation until every planned month
-            # has had its own complete applicant cohort.
-            if allocation_month < self.origination_months:
-                self._load_new_cohort()
-
-                terminated = False
-                truncated = False
-
-            else:
-                # All planned origination months are complete.
-                self.phase = "settlement"
-
-                terminated = self.portfolio.is_fully_settled
-
-                truncated = False
+            # End the applicant decision phase first. Monthly repayment and
+            # default events will occur on a separate transition step, where
+            # no credit-allocation action is taken.
+            self._transition_after_allocation_month = self.portfolio.month
+            self.phase = "transition"
+            terminated = False
+            truncated = False
 
         self.episode_done = terminated
 
