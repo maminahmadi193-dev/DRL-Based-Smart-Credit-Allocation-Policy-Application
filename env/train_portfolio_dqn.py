@@ -54,6 +54,8 @@ def parse_args():
     parser.add_argument("--applicants-per-month", type=int, default=None, help="Legacy fixed cohort size. When supplied alone, monthly cohort size is fixed.")
     parser.add_argument("--min-applicants-per-month", type=int, default=None, help="Minimum monthly cohort size (inclusive); default range is 30..70.")
     parser.add_argument("--max-applicants-per-month", type=int, default=None, help="Maximum monthly cohort size (inclusive).")
+    parser.add_argument("--reapplication-share", type=float, default=0.10, help="Target share of monthly applicants who reapply after cooldown; a scenario assumption.")
+    parser.add_argument("--reapplication-cooldown-months", type=int, default=3, help="Minimum months since the customer's previous application before reapplying.")
     parser.add_argument("--origination-months", type=int, default=12)
     parser.add_argument("--loan-term-months", type=int, choices=[12, 18, 24, 36], default=18, help="Fixed loan term used for all contracts in this run.")
     parser.add_argument("--annual-interest-rate", type=float, default=0.04, help="Nominal annual interest rate; converted to monthly rate internally.")
@@ -115,6 +117,10 @@ def main():
         raise ValueError("--min-applicants-per-month must be >= 1")
     if args.max_applicants_per_month < args.min_applicants_per_month:
         raise ValueError("--max-applicants-per-month must be >= min-applicants-per-month")
+    if not math.isfinite(args.reapplication_share) or not 0.0 <= args.reapplication_share <= 1.0:
+        raise ValueError("--reapplication-share must be between 0 and 1.")
+    if args.reapplication_cooldown_months < 1:
+        raise ValueError("--reapplication-cooldown-months must be >= 1.")
     if args.initial_budget <= 0 or args.financial_reward_scale <= 0:
         raise ValueError("Initial budget and financial reward scale must be positive.")
     if not math.isfinite(args.annual_interest_rate) or args.annual_interest_rate < 0:
@@ -194,6 +200,8 @@ def main():
         applicants_per_month=args.applicants_per_month,
         min_applicants_per_month=args.min_applicants_per_month,
         max_applicants_per_month=args.max_applicants_per_month,
+        reapplication_share=args.reapplication_share,
+        reapplication_cooldown_months=args.reapplication_cooldown_months,
         origination_months=args.origination_months,
         loan_term_months=args.loan_term_months,
         annual_interest_rate=args.annual_interest_rate,
@@ -252,6 +260,9 @@ def main():
     print(f"Seed                   : {args.seed}")
     print(f"Initial budget         : {args.initial_budget:,.0f}")
     print(f"Applicants/month range : {args.min_applicants_per_month}..{args.max_applicants_per_month} (uniform, inclusive)")
+    print(f"Reapplication share    : {args.reapplication_share:.1%} (scenario assumption)")
+    print(f"Reapplication cooldown: {args.reapplication_cooldown_months} months")
+    print("Reapplication rule    : no unpaid missed installment; active loans allowed")
     print(f"Origination months     : {args.origination_months}")
     print(f"Loan term              : {args.loan_term_months}")
     print(f"Annual nominal rate    : {args.annual_interest_rate:.2%}")
@@ -286,7 +297,9 @@ def main():
                 else "legacy"
             ),
             "environment_class": "PortfolioLoanEnv",
-            "environment_model_version": 4,
+            "environment_model_version": 5,
+            "applicant_arrival_model": "unique_first_time_rows_plus_configurable_reapplications",
+            "reapplication_eligibility": "cooldown_elapsed_and_no_unresolved_overdue_installment",
             "payment_model": "stochastic_full_or_zero_installment",
             "default_definition": "a missed installment is defaulted after > default_dpd_threshold_days",
             "hazard_intercept": hazard_intercept,
