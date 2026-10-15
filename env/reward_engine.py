@@ -139,26 +139,33 @@ class RewardEngine:
             )
         )
 
+    def risk_increase_penalty(self, risk_increase: float) -> float:
+        """Penalty for a non-negative increase in risk at loan origination."""
+        return self.risk_weight * max(0.0, float(risk_increase))
+
+    def recognized_default_penalty(self, recognized_default_count: float) -> float:
+        """Apply default_cost only to defaults newly recognized by the simulator."""
+        count = float(recognized_default_count)
+        if not np.isfinite(count) or count < 0.0:
+            raise ValueError("recognized_default_count must be finite and non-negative.")
+        return self.default_cost * count
+
     def _risk_penalty(
             self,
             previous_customer: CustomerState,
             outcome: SimulationOutcome
     ) -> float:
-        
-        delta_risk = max(0.0, 
-            outcome.next_state.risk -
-            previous_customer.risk
+        delta_risk = max(
+            0.0,
+            outcome.next_state.risk - previous_customer.risk,
         )
+        return self.risk_increase_penalty(delta_risk)
 
-        return self.risk_weight * delta_risk 
-    
     def _default_penalty(
             self,
             outcome: SimulationOutcome
         ) -> float:
-        if outcome.default_event:
-            return self.default_cost
-        return 0.0
+        return self.recognized_default_penalty(float(bool(outcome.default_event)))
     
     def _risk_cost(
             self,
