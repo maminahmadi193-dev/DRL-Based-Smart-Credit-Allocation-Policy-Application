@@ -256,9 +256,9 @@ def main():
             config = json.load(f)
         if int(config.get("environment_model_version", 1)) < 7:
             raise ValueError(
-                f"Model {run_name} predates the unique first-time applicant, "
-                "configurable reapplication process, and applicant-history observation. "
-                "Retrain it with env/train_portfolio_dqn.py before evaluation."
+                f"Model {run_name} predates the current first-time applicant, "
+                "reapplication, and one-time new-to-credit state logic. Retrain it with "
+                "env/train_portfolio_dqn.py before evaluation."
             )
         run_configs[run_name] = config
 
