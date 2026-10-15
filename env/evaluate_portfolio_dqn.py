@@ -48,6 +48,8 @@ def evaluate_episode(run_name, model, config, raw_df, scaler, episode, seed):
         applicants_per_month=int(config.get("applicants_per_month", 50)),
         min_applicants_per_month=config.get("min_applicants_per_month"),
         max_applicants_per_month=config.get("max_applicants_per_month"),
+        reapplication_share=float(config.get("reapplication_share", 0.10)),
+        reapplication_cooldown_months=int(config.get("reapplication_cooldown_months", 3)),
         origination_months=int(config["origination_months"]),
         loan_term_months=int(config["loan_term_months"]),
         annual_interest_rate=float(config.get("annual_interest_rate", float(config.get("monthly_interest_rate", 0.0)) * 12.0)),
@@ -181,6 +183,9 @@ def evaluate_episode(run_name, model, config, raw_df, scaler, episode, seed):
         "principal_collected": float(portfolio.cumulative_principal_collected)
             if hasattr(portfolio, "cumulative_principal_collected") else np.nan,
         "applicants_seen": int(applicants_seen),
+        "new_applicants_seen": int(env.new_applicants_seen),
+        "reapplications_seen": int(env.reapplications_seen),
+        "customers_with_reapplications": int(len(env.customers_with_reapplications)),
         "loans_granted": int(len(portfolio.contracts)),
         "loan_approval_rate": len(portfolio.contracts) / applicants_seen if applicants_seen else 0.0,
         "total_disbursed": float(portfolio.total_disbursed),
@@ -225,11 +230,11 @@ def main():
             )
         with config_path.open("r", encoding="utf-8") as f:
             config = json.load(f)
-        if int(config.get("environment_model_version", 1)) < 4:
+        if int(config.get("environment_model_version", 1)) < 5:
             raise ValueError(
-                f"Model {run_name} predates persistent customer state and explicit "
-                "monthly transition dynamics. Retrain it with env/train_portfolio_dqn.py "
-                "before evaluation in this environment."
+                f"Model {run_name} predates the unique first-time applicant and "
+                "configurable reapplication process. Retrain it with "
+                "env/train_portfolio_dqn.py before evaluation in this environment."
             )
         run_configs[run_name] = config
 
@@ -309,6 +314,9 @@ def main():
         "pending_delayed_receivables",
         "expected_delayed_installments",
         "applicants_seen",
+        "new_applicants_seen",
+        "reapplications_seen",
+        "customers_with_reapplications",
         "loans_granted",
         "loan_approval_rate",
         "total_disbursed",
@@ -360,6 +368,9 @@ def main():
         "mean_delayed_payment_amount_collected",
         "mean_pending_delayed_receivables",
         "mean_applicants_seen",
+        "mean_new_applicants_seen",
+        "mean_reapplications_seen",
+        "mean_customers_with_reapplications",
         "mean_loans_granted",
         "mean_average_loan_size",
         "mean_final_cash",
