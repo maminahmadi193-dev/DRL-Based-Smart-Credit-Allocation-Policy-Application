@@ -230,11 +230,11 @@ def main():
             )
         with config_path.open("r", encoding="utf-8") as f:
             config = json.load(f)
-        if int(config.get("environment_model_version", 1)) < 5:
+        if int(config.get("environment_model_version", 1)) < 6:
             raise ValueError(
-                f"Model {run_name} predates the unique first-time applicant and "
-                "configurable reapplication process. Retrain it with "
-                "env/train_portfolio_dqn.py before evaluation in this environment."
+                f"Model {run_name} predates the unique first-time applicant, "
+                "configurable reapplication process, and applicant-history observation. "
+                "Retrain it with env/train_portfolio_dqn.py before evaluation."
             )
         run_configs[run_name] = config
 
