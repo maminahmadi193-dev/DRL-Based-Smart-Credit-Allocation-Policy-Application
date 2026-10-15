@@ -290,6 +290,7 @@ def evaluate_one_episode(policy: str, episode: int, seed: int, df: pd.DataFrame,
 
     max_steps = (
         env.max_applicants_per_month * args.origination_months
+        + args.origination_months
         + args.loan_term_months + env.portfolio.max_delay_months + 10
     )
     terminated = False
