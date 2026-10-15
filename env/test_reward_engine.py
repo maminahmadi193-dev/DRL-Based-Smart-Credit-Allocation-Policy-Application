@@ -46,6 +46,19 @@ class TestRewardEngine(unittest.TestCase):
             )
             self.assertEqual(engine._social_reward(make_customer(), 0), 0.0)
 
+    def test_default_cost_is_charged_only_for_newly_recognized_defaults(self):
+        engine = RewardEngine(default_cost=10.0)
+
+        self.assertEqual(engine.recognized_default_penalty(0), 0.0)
+        self.assertEqual(engine.recognized_default_penalty(1), 10.0)
+        self.assertEqual(engine.recognized_default_penalty(2), 20.0)
+
+        with self.assertRaises(ValueError):
+            engine.recognized_default_penalty(-1)
+
+        with self.assertRaises(ValueError):
+            RewardEngine(default_cost=-1.0)
+
     def test_facility_reward_uses_credit_eligibility_limit(self):
         engine = RewardEngine()
         low_limit = make_customer(total_facilities=0)
