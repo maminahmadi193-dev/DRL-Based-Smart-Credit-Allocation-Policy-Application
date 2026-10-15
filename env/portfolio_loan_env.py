@@ -957,6 +957,8 @@ class PortfolioLoanEnv(gym.Env):
             "month": self.portfolio.month,
             "customer_index": acted_customer_index,
             "is_reapplication": acted_customer_is_reapplication,
+            "previous_application_count": int(self.current_prior_application_count),
+            "application_number": int(self.current_prior_application_count + 1),
             "applicants_in_cohort": cohort_size,
             "total_applicants_seen": self.total_applicants_seen,
             "action_index": action,
