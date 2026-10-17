@@ -121,18 +121,17 @@ def collect_reference_observations(
     action_amounts = np.asarray(PortfolioLoanEnv.ACTION_AMOUNTS, dtype=np.int64)
 
     env = _make_env(config, raw_df, scaler)
-    max_steps = (
-        env.max_applicants_per_month * env.origination_months
-        + env.origination_months
-        + env.loan_term_months
-        + env.portfolio.max_delay_months
-        + 10
-    )
-
     try:
         for episode_index in range(1, episodes + 1):
             seed = eval_seed + episode_index - 1
             obs, _ = env.reset(seed=seed)
+            max_steps = (
+                env.max_applicants_per_month * env.origination_months
+                + env.origination_months
+                + env.loan_term_months
+                + env.portfolio.max_delay_months
+                + 10
+            )
             decision_index = 0
             for step_index in range(max_steps):
                 # Only allocation decisions are relevant; settlement transitions
