@@ -10,6 +10,8 @@ The panel reflects states visited under the reference checkpoint's policy.
 """
 from __future__ import annotations
 
+import _bootstrap  # noqa: F401
+
 import argparse
 import json
 import re

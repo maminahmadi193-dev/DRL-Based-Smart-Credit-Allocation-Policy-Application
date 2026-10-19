@@ -34,6 +34,13 @@ The groupings below are based on current usage and filenames. Before a file is m
 - Cash-flow trace: `scripts/trace_portfolio_cashflows.py`
 - Budget sensitivity: `scripts/analyze_budget_sensitivity.py`
 
+### Portfolio diagnostics ? scripts
+
+- `scripts/analyze_checkpoint_q_stability.py`
+- `scripts/analyze_immediate_reward_by_amount.py`
+- `scripts/analyze_social_reward_components.py`
+- `scripts/compare_checkpoint_actions_fixed_states.py`
+
 ### Tests
 
 - Core regression tests: `test_reward_engine.py`, `test_portfolio_simulator.py`, and `test_portfolio_loan_env.py` are in `tests/`. Run the complete suite with `python tests/run_tests.py`.
@@ -43,12 +50,8 @@ The groupings below are based on current usage and filenames. Before a file is m
 ### Analysis and earlier experiments — classify before relocating
 
 - `analyze2.py`
-- `analyze_checkpoint_q_stability.py`
-- `analyze_immediate_reward_by_amount.py`
 - `analyze_reward_landscape.py`
 - `analyze_risk_landscape.py`
-- `analyze_social_reward_components.py`
-- `compare_checkpoint_actions_fixed_states.py`
 - `coverage_dqn.py`
 - `exact_reference_mdp.py`
 - `inspect_reward.py`

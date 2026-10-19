@@ -1,13 +1,15 @@
 """Decompose the social reward used by PortfolioLoanEnv.
 
 Run from the repository root:
-    python env/analyze_social_reward_components.py --require-real-data
+    python scripts/analyze_social_reward_components.py --require-real-data
 
 This is a diagnostic only: it does not train DQN or modify RewardEngine.
 It calls RewardEngine's actual component methods and checks that their sum
 matches RewardEngine._social_reward for every sampled row/action.
 """
 from __future__ import annotations
+
+import _bootstrap  # noqa: F401
 
 import argparse
 import json

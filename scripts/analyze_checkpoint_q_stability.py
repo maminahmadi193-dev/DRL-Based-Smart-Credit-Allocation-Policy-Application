@@ -7,6 +7,8 @@ It is not a proof of convergence and does not estimate Q* for the full MDP.
 """
 from __future__ import annotations
 
+import _bootstrap  # noqa: F401
+
 import argparse
 import json
 from pathlib import Path

@@ -1,14 +1,16 @@
 """Diagnose immediate social reward by candidate loan amount.
 
 Run from the repository root with the real dataset available:
-    python env/analyze_immediate_reward_by_amount.py --split test
-    python env/analyze_immediate_reward_by_amount.py --split full
+    python scripts/analyze_immediate_reward_by_amount.py --split test
+    python scripts/analyze_immediate_reward_by_amount.py --split full
 
 This isolates RewardEngine._social_reward from future cash flows and from the
 explicit risk/default penalties that are not currently wired into the
 portfolio environment's allocation reward. It answers whether larger loans
 actually produce a larger immediate social reward for the observed population.
 """
+
+import _bootstrap  # noqa: F401
 
 import argparse
 from pathlib import Path
