@@ -33,12 +33,10 @@ Use the `--data` argument when running an experiment with a different local path
 Run these commands from the repository root in the project's Python environment:
 
 ```powershell
-python env/test_reward_engine.py
-python env/test_portfolio_simulator.py
-python env/test_portfolio_loan_env.py
+python tests/run_tests.py
 ```
 
-The focused simulator and environment tests passed on the work PC on **2026-10-19** (16 simulator tests and 22 environment tests). Gymnasium emitted warnings that the observation-space Box uses infinite bounds; the tests still passed. This warning remains an open engineering item and should be evaluated separately from the simulator/reward logic.
+The combined suite (`python tests/run_tests.py`) passed on the work PC on **2026-10-19** (53 tests). Gymnasium emitted warnings that the observation-space Box uses infinite bounds; the affected tests passed. This warning remains an open engineering item and should be evaluated separately from simulator and reward logic.
 
 ## Training and evaluation discipline
 

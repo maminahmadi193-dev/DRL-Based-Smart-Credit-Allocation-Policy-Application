@@ -7,8 +7,7 @@
 
 - The work-PC working tree was aligned with `origin/feature/portfolio-rl`.
 - The only untracked paths reported at the time of the audit were local run/output directories under `models/portfolio_dqn/` and `models/results/`.
-- `python env/test_portfolio_simulator.py`: **16 tests passed**.
-- `python env/test_portfolio_loan_env.py`: **22 tests passed**.
+- `python tests/run_tests.py`: **53 tests passed** in the combined suite (verified on 2026-10-19).
 - Gymnasium's checker warned that the observation-space `Box` has infinite lower/upper bounds. The affected tests passed; the warning is noted, not silently suppressed or fixed here.
 - The data file `notebooks/df_cleaned.csv` is local and is not expected in Git.
 
@@ -37,8 +36,8 @@ The groupings below are based on current usage and filenames. Before a file is m
 
 ### Tests
 
-- Core tests: `test_reward_engine.py`, `test_portfolio_simulator.py`, `test_portfolio_loan_env.py`
-- Other regression/research tests to retain while dependencies are checked: `test_baseline_policy_metrics.py`, `test_exact_reference_mdp.py`, `test_stability.py`
+- Core regression tests: `test_reward_engine.py`, `test_portfolio_simulator.py`, and `test_portfolio_loan_env.py` are in `tests/`. Run the complete suite with `python tests/run_tests.py`.
+- Additional regression/research tests now in `tests/`: `test_baseline_policy_metrics.py` and `test_exact_reference_mdp.py`. The location and dependencies of `test_stability.py` still need separate review before any move or removal.
 - `test.py` needs inspection to determine whether it is an old test module, an experiment, or both.
 
 ### Analysis and earlier experiments — classify before relocating
