@@ -1,13 +1,17 @@
+# Python virtual environments and cache
 venv/
-__pycache__/
-*.csv
-*.zip
-docs/g10.csv
 .venv/
 .venv312/
+__pycache__/
+*.py[cod]
 
-# Local generated portfolio-DQN runs (configs, logs, checkpoints)
+# Local datasets (do not commit customer-level data)
+notebooks/*.csv
+docs/g10.csv
+
+# Generated local training runs and analysis outputs
 /models/portfolio_dqn/
-
-# Local experiment outputs/configs; tracked legacy plots remain tracked
 /models/results/
+
+# Model/checkpoint archives
+/models/**/*.zip
