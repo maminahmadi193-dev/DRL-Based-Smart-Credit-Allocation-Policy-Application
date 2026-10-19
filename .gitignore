@@ -5,3 +5,9 @@ __pycache__/
 docs/g10.csv
 .venv/
 .venv312/
+
+# Local generated portfolio-DQN runs (configs, logs, checkpoints)
+/models/portfolio_dqn/
+
+# Local experiment outputs/configs; tracked legacy plots remain tracked
+/models/results/
