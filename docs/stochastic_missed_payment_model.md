@@ -69,9 +69,7 @@ The default settings are exposed by the training, baseline, and trace scripts:
 The single-loan stress trace forces a missed installment using a very high hazard. Example commands from the repository root:
 
 ```powershell
-python env/test_portfolio_simulator.py
-python env/test_portfolio_loan_env.py
-python env/test_reward_engine.py
+python tests/run_tests.py
 python env/trace_portfolio_cashflows.py --data "C:\path\to\df_cleaned.csv" --stress-max-delay --output "models/results/portfolio_cashflow_stress.csv"
 python env/train_portfolio_dqn.py --data "C:\path\to\df_cleaned.csv" --run-name portfolio_dqn_stochastic_payments_smoke --timesteps 5000 --seed 42
 ```

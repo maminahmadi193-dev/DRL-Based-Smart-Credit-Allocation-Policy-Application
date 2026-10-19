@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/portfolio-rl
+      - chore/stabilize-project-structure
   pull_request:
     branches:
       - feature/portfolio-rl
@@ -27,13 +28,11 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install numpy pandas scikit-learn gymnasium
 
-      - name: Compile environment modules
-        run: python -m compileall -q env
+      - name: Compile environment and test modules
+        run: python -m compileall -q env tests
 
-      - name: Run portfolio and reward unit tests
-        working-directory: env
-        run: |
-          python -m unittest test_portfolio_simulator test_portfolio_loan_env test_reward_engine test_baseline_policy_metrics -v
+      - name: Run complete regression test suite
+        run: python tests/run_tests.py
 
       - name: Smoke-test baseline policy pipeline
         run: |
