@@ -1,4 +1,4 @@
-﻿"""Run automated tests from the repository root.
+"""Run automated tests from the repository root.
 
 Usage:
     python tests/run_tests.py
@@ -10,11 +10,13 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ENV_DIR = PROJECT_ROOT / "env"
+SCRIPTS_DIR = PROJECT_ROOT / "scripts"
 TESTS_DIR = PROJECT_ROOT / "tests"
 
 # Preserve existing imports from modules inside env/.
 sys.path.insert(0, str(ENV_DIR))
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(SCRIPTS_DIR))
 
 
 def main():

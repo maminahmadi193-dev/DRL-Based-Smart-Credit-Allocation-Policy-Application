@@ -26,6 +26,7 @@ import numpy as np
 import pandas as pd
 from stable_baselines3 import DQN
 
+import _bootstrap  # noqa: F401
 from portfolio_experiment_utils import load_split_and_scaler, project_root
 from portfolio_loan_env import PortfolioLoanEnv
 

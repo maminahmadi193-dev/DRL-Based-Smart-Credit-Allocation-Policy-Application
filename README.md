@@ -14,9 +14,9 @@ The core pieces are:
 - `env/portfolio_simulator.py` — shared cash, contracts, installments, missed payments, collections, and portfolio accounting.
 - `env/portfolio_loan_env.py` — the Gymnasium environment for portfolio-level allocation.
 - `env/portfolio_experiment_utils.py` — data splitting, feature scaling, and shared experiment utilities.
-- `env/train_portfolio_dqn.py` — DQN training entry point.
-- `env/evaluate_portfolio_dqn.py`, `env/evaluate_portfolio_dqn_checkpoints.py`, and `env/evaluate_baseline_policies.py` — evaluation entry points.
-- `env/analyze_budget_sensitivity.py` — evaluates one frozen checkpoint across initial-budget scenarios; it does not train a model.
+- `scripts/train_portfolio_dqn.py` — DQN training entry point.
+- `scripts/evaluate_portfolio_dqn.py`, `scripts/evaluate_portfolio_dqn_checkpoints.py`, and `scripts/evaluate_baseline_policies.py` — evaluation entry points.
+- `scripts/analyze_budget_sensitivity.py` — evaluates one frozen checkpoint across initial-budget scenarios; it does not train a model.
 
 ## Data
 

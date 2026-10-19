@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pandas as pd
 
+import _bootstrap  # noqa: F401
 from portfolio_experiment_utils import (
     calibrate_hazard_intercept_for_population,
     load_split_and_scaler,

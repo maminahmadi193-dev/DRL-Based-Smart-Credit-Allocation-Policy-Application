@@ -17,6 +17,7 @@ import pandas as pd
 from stable_baselines3 import DQN
 from stable_baselines3.common.callbacks import CheckpointCallback
 
+import _bootstrap  # noqa: F401
 from portfolio_experiment_utils import (
     calibrate_hazard_intercept_for_population,
     load_split_and_scaler,
@@ -80,7 +81,7 @@ def parse_args():
         default=0.005,
         help="Maximum monthly hazard; the population rate is calibrated through a logistic intercept.",
     )
-    parser.add_argument("--target-annual-default-rate", type=float, default=0.013, help="Target annual 90+ DPD default probability over 12 months for reference exposure (default: 1.3%).")
+    parser.add_argument("--target-annual-default-rate", type=float, default=0.013, help="Target annual 90+ DPD default probability over 12 months for reference exposure (default: 1.3%%).")
     parser.add_argument("--reference-loan-amount", type=float, default=100_000_000, help="Reference loan amount for population calibration.")
     parser.add_argument("--social-reward-weight", type=float, default=1.0)
     parser.add_argument("--financial-reward-weight", type=float, default=1.0)

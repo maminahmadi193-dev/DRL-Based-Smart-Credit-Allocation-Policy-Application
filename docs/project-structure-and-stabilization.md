@@ -29,10 +29,10 @@ The groupings below are based on current usage and filenames. Before a file is m
 
 ### Main portfolio experiment entry points
 
-- Training: `train_portfolio_dqn.py`
-- Evaluation: `evaluate_portfolio_dqn.py`, `evaluate_portfolio_dqn_checkpoints.py`, `evaluate_baseline_policies.py`
-- Cash-flow trace: `trace_portfolio_cashflows.py`
-- Budget sensitivity: `analyze_budget_sensitivity.py`
+- Training: `scripts/train_portfolio_dqn.py`
+- Evaluation: `scripts/evaluate_portfolio_dqn.py`, `scripts/evaluate_portfolio_dqn_checkpoints.py`, `scripts/evaluate_baseline_policies.py`
+- Cash-flow trace: `scripts/trace_portfolio_cashflows.py`
+- Budget sensitivity: `scripts/analyze_budget_sensitivity.py`
 
 ### Tests
 

@@ -70,8 +70,8 @@ The single-loan stress trace forces a missed installment using a very high hazar
 
 ```powershell
 python tests/run_tests.py
-python env/trace_portfolio_cashflows.py --data "C:\path\to\df_cleaned.csv" --stress-max-delay --output "models/results/portfolio_cashflow_stress.csv"
-python env/train_portfolio_dqn.py --data "C:\path\to\df_cleaned.csv" --run-name portfolio_dqn_stochastic_payments_smoke --timesteps 5000 --seed 42
+python scripts/trace_portfolio_cashflows.py --data "C:\path\to\df_cleaned.csv" --stress-max-delay --output "models/results/portfolio_cashflow_stress.csv"
+python scripts/train_portfolio_dqn.py --data "C:\path\to\df_cleaned.csv" --run-name portfolio_dqn_stochastic_payments_smoke --timesteps 5000 --seed 42
 ```
 
 Models trained before environment model version 3 do not include the population-calibrated hazard intercept and must be retrained before comparison under these dynamics.

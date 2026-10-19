@@ -24,6 +24,7 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 
+import _bootstrap  # noqa: F401
 from portfolio_loan_env import PortfolioLoanEnv
 from portfolio_experiment_utils import (
     calibrate_hazard_intercept_for_population,

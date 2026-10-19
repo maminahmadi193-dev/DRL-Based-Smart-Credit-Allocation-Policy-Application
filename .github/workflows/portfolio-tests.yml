@@ -29,22 +29,22 @@ jobs:
           python -m pip install numpy pandas scikit-learn gymnasium
 
       - name: Compile environment and test modules
-        run: python -m compileall -q env tests
+        run: python -m compileall -q env tests scripts
 
       - name: Run complete regression test suite
         run: python tests/run_tests.py
 
       - name: Smoke-test baseline policy pipeline
         run: |
-          python env/evaluate_baseline_policies.py --episodes 1 --applicants-per-month 1 --origination-months 1 --loan-term-months 12 --initial-budget 1000000000 --max-hazard 1000 --default-collection-lag-months 12 --output-dir "$RUNNER_TEMP/portfolio-baseline-smoke"
+          python scripts/evaluate_baseline_policies.py --episodes 1 --applicants-per-month 1 --origination-months 1 --loan-term-months 12 --initial-budget 1000000000 --max-hazard 1000 --default-collection-lag-months 12 --output-dir "$RUNNER_TEMP/portfolio-baseline-smoke"
 
       - name: Smoke-test cash-flow trace under missed-payment stress
         run: |
-          PYTHONPATH=env python - <<'PY'
+          PYTHONPATH=scripts:env python - <<'PY'
           import os
           from evaluate_baseline_policies import make_synthetic_dataset
           path = os.path.join(os.environ["RUNNER_TEMP"], "portfolio-synthetic.csv")
           make_synthetic_dataset(500, seed=42).to_csv(path, index=False)
           print(path)
           PY
-          python env/trace_portfolio_cashflows.py --data "$RUNNER_TEMP/portfolio-synthetic.csv" --stress-max-delay --loan-term-months 12 --output "$RUNNER_TEMP/portfolio-cashflow-trace.csv"
+          python scripts/trace_portfolio_cashflows.py --data "$RUNNER_TEMP/portfolio-synthetic.csv" --stress-max-delay --loan-term-months 12 --output "$RUNNER_TEMP/portfolio-cashflow-trace.csv"
