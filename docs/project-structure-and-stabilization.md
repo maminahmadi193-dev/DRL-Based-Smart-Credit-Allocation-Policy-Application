@@ -13,7 +13,7 @@
 
 These results describe the reported work-PC run only; they are not a CI guarantee.
 
-## 2. Provisional inventory
+## 2. Current inventory and remaining review
 
 The groupings below are based on current usage and filenames. Before a file is moved or deleted, inspect its imports, callers, purpose, and whether it is needed to reproduce a previous result.
 
@@ -34,7 +34,7 @@ The groupings below are based on current usage and filenames. Before a file is m
 - Cash-flow trace: `scripts/trace_portfolio_cashflows.py`
 - Budget sensitivity: `scripts/analyze_budget_sensitivity.py`
 
-### Portfolio diagnostics ? scripts
+### Portfolio diagnostics - scripts
 
 - `scripts/analyze_checkpoint_q_stability.py`
 - `scripts/analyze_immediate_reward_by_amount.py`
@@ -102,15 +102,15 @@ project/
 
 This is a target, not the current on-disk layout. Moving modules can break imports and script execution paths, so perform moves in small batches and run regression tests after each batch.
 
-## 5. Stabilization sequence
+## 5. Stabilization status and remaining sequence
 
-1. Protect local model runs and generated results from accidental Git staging.
-2. Document the environment's current behavior and reward calculation, including the stochastic missed-payment/collection assumptions.
-3. Inventory imports and command-line entry points; identify genuinely obsolete code only after inspecting usage.
-4. Move tests to `tests/` and scripts to `scripts/` in separate commits, updating imports/instructions and running the test suite after each move.
-5. Run all applicable deterministic tests and short synthetic-data smoke tests.
-6. Capture a named baseline commit and configuration before any budget-specific training.
-7. Train separate policies for the four budget levels and evaluate on the same validation protocol. Do not use the test split to select budgets or models.
+1. **Complete:** protect local model runs and generated results from accidental Git staging.
+2. **Documented; verify at baseline freeze:** preserve the environment behavior, reward calculation, and stochastic missed-payment/collection assumptions.
+3. **Complete for the main entry-point migration:** tests and experiment scripts have been inventoried; review remaining support-module dependencies before any further move or deletion.
+4. **Complete:** move regression tests into `tests/` and experiment entry points and diagnostics into `scripts/`, with imports and command examples updated in separate commits.
+5. **Passed for the current code snapshot:** 53 local regression tests pass, and GitHub Actions has passed compilation, regression, baseline-policy smoke, and cash-flow trace smoke stages.
+6. **Next:** capture a named baseline commit and configuration before any budget-specific training.
+7. **Pending:** train separate policies for the four budget levels and evaluate them on the same validation protocol. Do not use the test split to select budgets or models.
 
 ## 6. Explicitly deferred items
 

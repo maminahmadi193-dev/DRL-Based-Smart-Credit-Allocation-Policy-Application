@@ -2,7 +2,7 @@
 
 This repository contains an evolving research implementation for credit-allocation policies using a portfolio-level Gymnasium environment and Stable-Baselines3 DQN.
 
-> **Development status:** the portfolio simulator and environment are the current implementation under active development. Older single-customer experiments and one-off diagnostic scripts are still present and are being catalogued before any move or deletion.
+> **Development status:** the portfolio simulator and environment are the current implementation under active development. Older single-customer experiments and diagnostics are retained under `scripts/`; their supporting modules remain in `env/` pending a separate dependency and reproducibility review.
 
 ## Current portfolio-level implementation
 
@@ -36,7 +36,7 @@ Run these commands from the repository root in the project's Python environment:
 python tests/run_tests.py
 ```
 
-The combined suite (`python tests/run_tests.py`) passed on the work PC on **2026-10-19** (53 tests). Gymnasium emitted warnings that the observation-space Box uses infinite bounds; the affected tests passed. This warning remains an open engineering item and should be evaluated separately from simulator and reward logic.
+The combined suite (`python tests/run_tests.py`) passed on the work PC on **2026-10-20** (53 tests), and the structural-cleanup branch has passed GitHub Actions. Gymnasium emitted warnings that the observation-space Box uses infinite bounds; the affected tests passed. This warning remains an open engineering item and should be evaluated separately from simulator and reward logic.
 
 ## Training and evaluation discipline
 
@@ -50,4 +50,4 @@ Generated runs and result bundles under `models/portfolio_dqn/` and `models/resu
 
 ## Repository organization
 
-The current repository is being refactored in small, testable steps. See [the project structure and stabilization notes](docs/project-structure-and-stabilization.md) for the provisional file inventory, known issues, and migration plan. No core environment or reward behavior is changed by the initial documentation/ignore-file pass.
+The structural cleanup has moved automated tests into `tests/` and experiment entry points and diagnostics into `scripts/` in small, separately validated commits. See [the project structure and stabilization notes](docs/project-structure-and-stabilization.md) for the current inventory, remaining review items, and baseline plan. These moves have not intentionally changed the portfolio environment, reward calculations, or loan simulation.
