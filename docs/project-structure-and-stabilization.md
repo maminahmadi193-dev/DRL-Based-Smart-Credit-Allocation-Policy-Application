@@ -47,19 +47,24 @@ The groupings below are based on current usage and filenames. Before a file is m
 - Additional regression/research tests now in `tests/`: `test_baseline_policy_metrics.py` and `test_exact_reference_mdp.py`. The location and dependencies of `test_stability.py` still need separate review before any move or removal.
 - `test.py` needs inspection to determine whether it is an old test module, an experiment, or both.
 
-### Analysis and earlier experiments — classify before relocating
+### Legacy single-customer diagnostic scripts in `scripts/`
 
-- `analyze2.py`
-- `analyze_reward_landscape.py`
-- `analyze_risk_landscape.py`
-- `coverage_dqn.py`
-- `exact_reference_mdp.py`
-- `inspect_reward.py`
-- `pd_calibration.py`
-- `train.py`
+- `scripts/analyze2.py` (offline reward/regret post-processing)
+- `scripts/analyze_reward_landscape.py`
+- `scripts/analyze_risk_landscape.py`
+- `scripts/inspect_reward.py`
+
+These scripts depend on the legacy single-customer environment or its result files. Their calculations and local data/result paths are intentionally unchanged. They are not targets for automated smoke execution.
+
+### Remaining analysis and earlier experiments - classify before relocating
+
+- `coverage_dqn.py` (support module for legacy DQN training)
+- `exact_reference_mdp.py` (retained in `env/` pending separate review)
+- `pd_calibration.py` (currently a placeholder)
+- `train.py` (legacy DQN training)
 - `train_policy_classifier.py`
 - `train_q_regression.py`
-- `loan_env.py` (legacy single-customer environment candidate)
+- `loan_env.py` (legacy single-customer environment)
 
 These files are not marked for deletion. Some may retain important diagnostic logic or support results already cited in the research history.
 

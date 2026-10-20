@@ -1,3 +1,5 @@
+import _bootstrap  # noqa: F401
+
 import pandas as pd
 import numpy as np
 
