@@ -1,3 +1,5 @@
+import _bootstrap  # noqa: F401
+
 import os
 import random
 
@@ -20,19 +22,19 @@ from reward_engine import RewardEngine
 # Configuration
 # ============================================================================
 
-PATH = r"C:\Users\m.ahmadi\Desktop\FinalProject\notebooks\df_cleaned.csv"
+PATH = r"C:\\Users\\m.ahmadi\\Desktop\\FinalProject\\notebooks\\df_cleaned.csv"
 
 RANDOM_STATE = 42
 
 EPOCHS = 100
 BATCH_SIZE = 256
-LEARNING_RATE = 1e-3
+LEARNING_RATE = 4e-3
 PATIENCE = 10
 
 HIDDEN_DIM = 128
 
-MODEL_PATH = "models/policy_classifier.pt"
-SCALER_PATH = "models/policy_classifier_scaler.pkl"
+MODEL_PATH = "models/q_regression.pt"
+SCALER_PATH = "models/q_regression_scaler.pkl"
 
 TIE_TOLERANCE = 0.01
 
@@ -162,7 +164,7 @@ def row_to_customer_state(row):
 
 
 # ============================================================================
-# DataFrame -> Model Input
+# Convert DataFrame -> Model Input
 # ============================================================================
 
 def dataframe_to_features(
@@ -189,7 +191,7 @@ def dataframe_to_features(
 
 
 # ============================================================================
-# Generate Oracle Rewards
+# Generate Reward Targets
 # ============================================================================
 
 def generate_reward_targets(
@@ -198,7 +200,7 @@ def generate_reward_targets(
     reward_engine,
 ):
 
-    rewards = np.zeros(
+    targets = np.zeros(
         (len(df), len(ACTIONS)),
         dtype=np.float32
     )
@@ -233,33 +235,19 @@ def generate_reward_targets(
 
             )
 
-            rewards[
+            targets[
                 i,
                 action_index
             ] = reward
 
-    return rewards
+    return targets
 
 
 # ============================================================================
-# Convert Rewards -> Oracle Actions
+# Q Regression Network
 # ============================================================================
 
-def rewards_to_oracle_actions(
-    rewards
-):
-
-    return np.argmax(
-        rewards,
-        axis=1
-    ).astype(np.int64)
-
-
-# ============================================================================
-# Policy Classifier
-# ============================================================================
-
-class PolicyClassifier(nn.Module):
+class QRegressionNetwork(nn.Module):
 
     def __init__(
         self,
@@ -305,8 +293,7 @@ class PolicyClassifier(nn.Module):
 def evaluate(
     model,
     X,
-    oracle_rewards,
-    oracle_actions,
+    true_rewards,
 ):
 
     model.eval()
@@ -317,14 +304,38 @@ def evaluate(
 
     with torch.no_grad():
 
-        logits = model(
-            X_tensor
+        predicted_rewards = (
+            model(X_tensor)
+            .cpu()
+            .numpy()
         )
 
-        predicted_actions = torch.argmax(
-            logits,
-            dim=1
-        ).cpu().numpy()
+    # ------------------------------------------------------------------------
+    # Predicted policy
+    # ------------------------------------------------------------------------
+
+    predicted_actions = np.argmax(
+        predicted_rewards,
+        axis=1
+    )
+
+    # ------------------------------------------------------------------------
+    # Oracle policy
+    # ------------------------------------------------------------------------
+
+    oracle_actions = np.argmax(
+        true_rewards,
+        axis=1
+    )
+
+    # ------------------------------------------------------------------------
+    # Oracle reward
+    # ------------------------------------------------------------------------
+
+    oracle_rewards = np.max(
+        true_rewards,
+        axis=1
+    )
 
     # ------------------------------------------------------------------------
     # Reward obtained by predicted policy
@@ -332,9 +343,9 @@ def evaluate(
 
     predicted_policy_rewards = (
 
-        oracle_rewards[
+        true_rewards[
             np.arange(
-                len(oracle_rewards)
+                len(true_rewards)
             ),
             predicted_actions
         ]
@@ -342,20 +353,11 @@ def evaluate(
     )
 
     # ------------------------------------------------------------------------
-    # Oracle reward
-    # ------------------------------------------------------------------------
-
-    best_rewards = np.max(
-        oracle_rewards,
-        axis=1
-    )
-
-    # ------------------------------------------------------------------------
     # Regret
     # ------------------------------------------------------------------------
 
     regret = (
-        best_rewards
+        oracle_rewards
         - predicted_policy_rewards
     )
 
@@ -376,7 +378,20 @@ def evaluate(
         regret <= TIE_TOLERANCE
     )
 
+    # ------------------------------------------------------------------------
+    # Q regression error
+    # ------------------------------------------------------------------------
+
+    mse = np.mean(
+        (
+            predicted_rewards
+            - true_rewards
+        ) ** 2
+    )
+
     return {
+
+        "mse": float(mse),
 
         "mean_regret": float(
             np.mean(regret)
@@ -399,6 +414,9 @@ def evaluate(
 
         "regret":
             regret,
+
+        "predicted_rewards":
+            predicted_rewards,
 
     }
 
@@ -439,11 +457,11 @@ def main():
     # =========================================================================
     # Train / Validation / Test Split
     #
-    # Same split as train.py
-    #
     # 70% Train
     # 10% Validation
     # 20% Test
+    #
+    # Exact same split logic as train.py
     # =========================================================================
 
     all_indices = np.arange(
@@ -536,7 +554,8 @@ def main():
     # =========================================================================
     # StandardScaler
     #
-    # Fit ONLY on training data
+    # IMPORTANT:
+    # Fit ONLY on training data.
     # =========================================================================
 
     train_features = train_raw.copy()
@@ -564,7 +583,7 @@ def main():
     )
 
     # =========================================================================
-    # Prepare Inputs
+    # Prepare Model Inputs
     # =========================================================================
 
     X_train = dataframe_to_features(
@@ -589,6 +608,8 @@ def main():
 
     # =========================================================================
     # Create Simulator and Reward Engine
+    #
+    # Same simulator and reward logic currently used by LoanEnv.
     # =========================================================================
 
     simulator = CustomerSimulator()
@@ -596,18 +617,23 @@ def main():
     reward_engine = RewardEngine()
 
     # =========================================================================
-    # Generate Oracle Rewards
+    # Generate Training Targets
+    #
+    # For each customer:
+    #
+    # [R(s,0), R(s,100M), ..., R(s,500M)]
+    #
     # =========================================================================
 
     print()
 
     print("=" * 70)
 
-    print("Generating training oracle rewards...")
+    print("Generating training reward targets...")
 
     print("=" * 70)
 
-    train_rewards = generate_reward_targets(
+    Y_train = generate_reward_targets(
 
         train_raw,
 
@@ -617,15 +643,19 @@ def main():
 
     )
 
+    # =========================================================================
+    # Generate Validation Targets
+    # =========================================================================
+
     print()
 
     print("=" * 70)
 
-    print("Generating validation oracle rewards...")
+    print("Generating validation reward targets...")
 
     print("=" * 70)
 
-    val_rewards = generate_reward_targets(
+    Y_val = generate_reward_targets(
 
         val_raw,
 
@@ -635,65 +665,26 @@ def main():
 
     )
 
-    # =========================================================================
-    # Oracle Actions
-    # =========================================================================
-
-    train_oracle_actions = rewards_to_oracle_actions(
-        train_rewards
-    )
-
-    val_oracle_actions = rewards_to_oracle_actions(
-        val_rewards
-    )
-
     print()
 
     print(
-        "Training oracle actions generated."
+        f"Training target shape   : {Y_train.shape}"
     )
 
     print(
-        "Validation oracle actions generated."
+        f"Validation target shape : {Y_val.shape}"
     )
 
     # =========================================================================
-    # Print Training Oracle Distribution
+    # Save Scaler
     # =========================================================================
 
-    print()
+    import joblib
 
-    print("=" * 70)
-
-    print("TRAINING ORACLE ACTION DISTRIBUTION")
-
-    print("=" * 70)
-
-    for action_index, amount in enumerate(ACTIONS):
-
-        count = np.sum(
-            train_oracle_actions
-            == action_index
-        )
-
-        percentage = (
-            count
-            / len(train_oracle_actions)
-        )
-
-        if amount == 0:
-
-            label = "0"
-
-        else:
-
-            label = f"{amount / 100_000_000:.0f}00M"
-
-        print(
-            f"{label:>6} : "
-            f"{count:6d} "
-            f"({percentage:6.2%})"
-        )
+    joblib.dump(
+        scaler,
+        SCALER_PATH
+    )
 
     # =========================================================================
     # Tensor Dataset
@@ -703,15 +694,15 @@ def main():
         X_train
     )
 
-    y_train_tensor = torch.from_numpy(
-        train_oracle_actions
+    Y_train_tensor = torch.from_numpy(
+        Y_train
     )
 
     train_dataset = TensorDataset(
 
         X_train_tensor,
 
-        y_train_tensor
+        Y_train_tensor
 
     )
 
@@ -733,11 +724,11 @@ def main():
 
     print("=" * 70)
 
-    print("Creating Policy Classifier...")
+    print("Creating Q Regression model...")
 
     print("=" * 70)
 
-    model = PolicyClassifier(
+    model = QRegressionNetwork(
 
         input_dim=X_train.shape[1],
 
@@ -747,7 +738,7 @@ def main():
 
     ).to(device)
 
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.MSELoss()
 
     optimizer = torch.optim.Adam(
 
@@ -798,12 +789,12 @@ def main():
 
             optimizer.zero_grad()
 
-            logits = model(
+            predictions = model(
                 batch_x
             )
 
             loss = criterion(
-                logits,
+                predictions,
                 batch_y
             )
 
@@ -835,9 +826,7 @@ def main():
 
             X_val,
 
-            val_rewards,
-
-            val_oracle_actions
+            Y_val
 
         )
 
@@ -845,8 +834,11 @@ def main():
 
             f"Epoch {epoch:03d} | "
 
-            f"Train CE: "
+            f"Train MSE: "
             f"{train_loss:.6f} | "
+
+            f"Val MSE: "
+            f"{validation_metrics['mse']:.6f} | "
 
             f"Regret: "
             f"{validation_metrics['mean_regret']:.6f} | "
@@ -920,7 +912,7 @@ def main():
         )
 
     # =========================================================================
-    # Save Model
+    # Save Final Model
     # =========================================================================
 
     torch.save(
@@ -958,9 +950,7 @@ def main():
 
         X_val,
 
-        val_rewards,
-
-        val_oracle_actions
+        Y_val
 
     )
 
@@ -971,6 +961,11 @@ def main():
     print("FINAL VALIDATION")
 
     print("=" * 70)
+
+    print(
+        f"Mean MSE           : "
+        f"{final_metrics['mse']:.6f}"
+    )
 
     print(
         f"Mean regret        : "
@@ -997,6 +992,11 @@ def main():
     print(
         f"Model saved to:"
         f"\n{MODEL_PATH}"
+    )
+
+    print(
+        f"\nScaler saved to:"
+        f"\n{SCALER_PATH}"
     )
 
 

@@ -43,9 +43,9 @@ The groupings below are based on current usage and filenames. Before a file is m
 
 ### Tests
 
-- Core regression tests: `test_reward_engine.py`, `test_portfolio_simulator.py`, and `test_portfolio_loan_env.py` are in `tests/`. Run the complete suite with `python tests/run_tests.py`.
-- Additional regression/research tests now in `tests/`: `test_baseline_policy_metrics.py` and `test_exact_reference_mdp.py`. The location and dependencies of `test_stability.py` still need separate review before any move or removal.
-- `test.py` needs inspection to determine whether it is an old test module, an experiment, or both.
+- Core regression tests: `test_reward_engine.py`, `test_portfolio_simulator.py`, and `test_portfolio_loan_env.py` are in `tests/`. Run all tests with `python tests/run_tests.py`.
+- The baseline-policy and exact-reference benchmark tests are also in `tests/`.
+- `scripts/analyze_legacy_dqn_convergence.py` and `scripts/analyze_legacy_dqn_stability.py` are research/evaluation scripts, not automated unit tests. They may depend on the local dataset and legacy model checkpoints.
 
 ### Legacy single-customer diagnostic scripts in `scripts/`
 
@@ -56,17 +56,24 @@ The groupings below are based on current usage and filenames. Before a file is m
 
 These scripts depend on the legacy single-customer environment or its result files. Their calculations and local data/result paths are intentionally unchanged. They are not targets for automated smoke execution.
 
-### Remaining analysis and earlier experiments - classify before relocating
+### Legacy single-customer experiment entry points - in `scripts/`
 
-- `coverage_dqn.py` (support module for legacy DQN training)
-- `exact_reference_mdp.py` (retained in `env/` pending separate review)
+- `scripts/train_legacy_dqn.py`
+- `scripts/analyze_legacy_dqn_convergence.py`
+- `scripts/analyze_legacy_dqn_stability.py`
+- `scripts/train_legacy_policy_classifier.py`
+- `scripts/train_legacy_q_regression.py`
+
+These preserve earlier experiment workflows. Their training calculations, evaluation logic, dataset paths, and model/result output locations are intentionally unchanged. They are not part of the current portfolio training pipeline.
+
+### Remaining analysis and support modules - keep in `env/` for now
+
+- `coverage_dqn.py` (support module for the legacy DQN trainer)
+- `exact_reference_mdp.py` (retained because the benchmark tests depend on it)
 - `pd_calibration.py` (currently a placeholder)
-- `train.py` (legacy DQN training)
-- `train_policy_classifier.py`
-- `train_q_regression.py`
 - `loan_env.py` (legacy single-customer environment)
 
-These files are not marked for deletion. Some may retain important diagnostic logic or support results already cited in the research history.
+These files are not marked for deletion. Review their usage and historical role separately before considering any removal.
 
 ## 3. Generated files and artifacts
 

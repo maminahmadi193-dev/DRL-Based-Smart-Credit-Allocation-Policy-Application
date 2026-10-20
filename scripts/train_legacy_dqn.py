@@ -1,3 +1,5 @@
+import _bootstrap  # noqa: F401
+
 # from stable_baselines3 import DQN
 
 from coverage_dqn import CoverageDQN
