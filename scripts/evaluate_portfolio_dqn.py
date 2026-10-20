@@ -1,7 +1,7 @@
 """Evaluate portfolio DQN models on the same held-out applicants and seeds.
 
 Run from repository root after training both models:
-    python env/evaluate_portfolio_dqn.py --run-names portfolio_dqn_legacy portfolio_dqn_amount_sensitive --episodes 20
+    python scripts/evaluate_portfolio_dqn.py --run-names portfolio_dqn_legacy portfolio_dqn_amount_sensitive --episodes 20
 
 The evaluator reports action distributions and computes social/total reward
 under BOTH reward formulas for each policy, allowing fair comparison even

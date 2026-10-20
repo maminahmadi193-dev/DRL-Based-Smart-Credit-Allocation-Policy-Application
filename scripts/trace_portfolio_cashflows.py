@@ -1,8 +1,8 @@
 """Trace one loan from origination through final delayed receipt.
 
 Run from the repository root:
-    python env/trace_portfolio_cashflows.py
-    python env/trace_portfolio_cashflows.py --stress-max-delay
+    python scripts/trace_portfolio_cashflows.py
+    python scripts/trace_portfolio_cashflows.py --stress-max-delay
 """
 import argparse
 import math

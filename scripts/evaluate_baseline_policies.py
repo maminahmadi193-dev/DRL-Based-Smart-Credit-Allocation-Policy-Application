@@ -1,7 +1,7 @@
 """Compare simple baseline policies in PortfolioLoanEnv.
 
 Run from the repository root:
-    python env/evaluate_baseline_policies.py
+    python scripts/evaluate_baseline_policies.py
 
 By default the script uses df_cleaned.csv if it finds it in common project
 locations. If no dataset is found, it uses a deterministic synthetic dataset

@@ -1,8 +1,8 @@
 """Train DQN on the portfolio-level credit-allocation environment.
 
 Examples from the repository root:
-    python env/train_portfolio_dqn.py --run-name portfolio_dqn_legacy --timesteps 5000
-    python env/train_portfolio_dqn.py --run-name portfolio_dqn_amount_sensitive --timesteps 5000 --scale-access-rewards-by-coverage
+    python scripts/train_portfolio_dqn.py --run-name portfolio_dqn_legacy --timesteps 5000
+    python scripts/train_portfolio_dqn.py --run-name portfolio_dqn_amount_sensitive --timesteps 5000 --scale-access-rewards-by-coverage
 
 Use the short runs above as pipeline smoke tests first. For a full run, increase
 --timesteps after verifying the output and evaluation scripts.

@@ -1,7 +1,7 @@
 """Evaluate saved DQN checkpoints on matched validation episodes.
 
 Train with --checkpoint-freq 5000 (or another suitable interval), then run:
-    python env/evaluate_portfolio_dqn_checkpoints.py --run-name RUN_NAME
+    python scripts/evaluate_portfolio_dqn_checkpoints.py --run-name RUN_NAME
 
 All checkpoints are assessed with the same validation rows and episode seeds.
 This makes the resulting reward curve useful for examining learning stability
