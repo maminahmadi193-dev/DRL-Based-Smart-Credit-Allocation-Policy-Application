@@ -22,7 +22,7 @@ Consequently, the computed \(Q^*\) is exact **only for this reduced benchmark**.
 From the repository root, using the project virtual environment:
 
 \`\`\`powershell
-python env/test_exact_reference_mdp.py
+python tests/run_tests.py
 python env/exact_reference_mdp.py --skip-dqn --q-learning-episodes 500000 --seed 42
 \`\`\`
 
