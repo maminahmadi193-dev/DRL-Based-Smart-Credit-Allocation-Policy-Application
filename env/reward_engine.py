@@ -63,7 +63,7 @@ class RewardEngine:
         previous_customer: CustomerState,
         coverage: float = 1.0,
     ) -> float:
-        """Reward new-to-credit customers, optionally scaled by need coverage."""
+        """Reward new-to-credit customers in proportion to need coverage."""
         if previous_customer.has_no_history:
             return self.history_reward * float(np.clip(coverage, 0.0, 1.0))
         return 0.0
@@ -78,8 +78,7 @@ class RewardEngine:
 
         TotalFacilities represents the amount the existing bank credit-scoring
         system says the customer may qualify for; it is not an amount actually
-        borrowed. This canonical portfolio reward scales with estimated-need
-        coverage.
+        borrowed. This reward scales with estimated-need coverage.
         """
         eligibility_limit = max(0.0, float(previous_customer.total_facilities))
         priority = 1.0 / (
