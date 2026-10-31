@@ -566,7 +566,7 @@ def main():
     print(f"Origination months       : {args.origination_months}")
     print(f"Loan term (months)       : {args.loan_term_months}")
     print(f"Annual nominal rate       : {args.annual_interest_rate:.2%}")
-    print(f"Monthly rate (derived)    : {args.annual_interest_rate / 12.0:.6%}")
+    print("Interest charge months   : 1, 13, 25, ... (annual rate on outstanding principal)")
     print(f"Maximum monthly hazard   : {args.max_hazard:.6f}")
     print(f"Target annual default rate : {args.target_annual_default_rate:.4%}")
     print(f"Reference loan amount    : {args.reference_loan_amount:,.0f}")
