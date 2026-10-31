@@ -77,7 +77,7 @@ These files are not marked for deletion. Review their usage and historical role 
 
 ## 3. Portfolio reward design
 
-The portfolio-level pipeline now has one fixed amount-sensitive social reward. `RewardEngine` and `PortfolioLoanEnv` do not expose a Legacy/experimental selector. Training writes `reward_mode: amount_sensitive`; evaluation and diagnostics use that same formula. The historical amount-independent access bonus is isolated in `LegacySingleCustomerRewardEngine` for the older single-customer `LoanEnv` and legacy classifier workflow. Environment model version 12 marks the reward-semantics change; pre-v12 portfolio checkpoints must be retrained before evaluation.
+The portfolio-level pipeline now has one fixed amount-sensitive social reward. `RewardEngine` and `PortfolioLoanEnv` do not expose a Legacy/experimental selector. Training writes `reward_mode: amount_sensitive`; evaluation and diagnostics use that same formula. The historical amount-independent access bonus is isolated in `LegacySingleCustomerRewardEngine` for the older single-customer `LoanEnv`, legacy policy-classifier, and legacy Q-regression workflows. Environment model version 12 marks the reward-semantics change; pre-v12 portfolio checkpoints must be retrained before evaluation.
 
 ## 3. Generated files and artifacts
 
