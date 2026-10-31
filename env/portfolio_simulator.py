@@ -701,6 +701,7 @@ class PortfolioSimulator:
             if contract.origin_month >= self.month:
                 continue
 
+            balance = contract.outstanding_principal
             principal_due, interest_due = (
                 contract.scheduled_installment_components()
             )
