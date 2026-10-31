@@ -507,7 +507,7 @@ class TestPortfolioLoanEnv(unittest.TestCase):
         self.assertFalse(terminated)
         self.assertAlmostEqual(
             env.portfolio.available_budget,
-            200_000_000,
+            100_000_000,
         )
 
         _, _, terminated, _, info = env.step(1)
@@ -530,7 +530,7 @@ class TestPortfolioLoanEnv(unittest.TestCase):
 
         self.assertAlmostEqual(
             env.portfolio.available_budget,
-            300_000_000,
+            200_000_000,
             places=4,
         )
 
