@@ -84,9 +84,11 @@ def load_inputs(args):
     with config_path.open("r", encoding="utf-8") as file:
         config = json.load(file)
 
-    if int(config.get("environment_model_version", 1)) < 7:
+    if int(config.get("environment_model_version", 1)) < PortfolioLoanEnv.ENVIRONMENT_MODEL_VERSION:
         raise ValueError(
-            "This diagnostic requires environment_model_version >= 7."
+            f"This diagnostic requires environment model version "
+            f">= {PortfolioLoanEnv.ENVIRONMENT_MODEL_VERSION}; the checkpoint "
+            "must use the synchronized customer-observation semantics."
         )
 
     if args.checkpoint_path:
