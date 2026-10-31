@@ -248,8 +248,13 @@ def main():
                 f"Model {run_name} uses environment_model_version="
                 f"{config.get('environment_model_version', 1)}; the current environment "
                 f"requires version {PortfolioLoanEnv.ENVIRONMENT_MODEL_VERSION} because "
-                "customer-observation synchronization semantics have changed. "
+                "customer-observation and reward semantics have changed. "
                 "Retrain the model with scripts/train_portfolio_dqn.py before evaluation."
+            )
+        if config.get("reward_mode") != "amount_sensitive":
+            raise ValueError(
+                f"Model {run_name} does not record the canonical amount-sensitive "
+                "reward design. Retrain it with the current portfolio training script."
             )
         run_configs[run_name] = config
 
