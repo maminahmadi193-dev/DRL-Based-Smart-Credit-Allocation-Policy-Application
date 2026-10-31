@@ -23,8 +23,9 @@ class LoanContract:
 
     principal: float
     outstanding_principal: float
-    monthly_payment: float
-    monthly_interest_rate: float
+    annual_interest_rate: float
+    principal_payment_amount: float
+    principal_payment_months: tuple[int, ...]
     monthly_hazard: float
     monthly_miss_probability: float
     default_probability_over_term: float
@@ -49,6 +50,37 @@ class LoanContract:
     survival_probability: float = 1.0
 
     status: str = "active"
+
+    def scheduled_installment_components(self) -> tuple[float, float]:
+        """Return the next contractual principal and annual-interest amounts."""
+        if self.remaining_months <= 0:
+            return 0.0, 0.0
+
+        payment_number = self.term_months - self.remaining_months + 1
+        principal_due = 0.0
+        interest_due = 0.0
+
+        # Annual interest is charged in the first payment month and every
+        # twelve payment months thereafter: 1, 13, 25, ...
+        if payment_number >= 1 and (payment_number - 1) % 12 == 0:
+            interest_balance = max(0.0, self.outstanding_principal)
+            if self.missed_installment_occurred and not self.late_payment_collected:
+                # A missed principal installment remains economically owed
+                # until its delayed collection is actually received.
+                interest_balance += max(0.0, self.missed_principal)
+            interest_due = interest_balance * self.annual_interest_rate
+
+        if payment_number in self.principal_payment_months:
+            if payment_number == self.principal_payment_months[-1]:
+                # Absorb floating-point residue in the final principal payment.
+                principal_due = max(0.0, self.outstanding_principal)
+            else:
+                principal_due = min(
+                    max(0.0, self.outstanding_principal),
+                    max(0.0, self.principal_payment_amount),
+                )
+
+        return principal_due, interest_due
 
 
 @dataclass
@@ -117,7 +149,7 @@ class PortfolioSimulator:
         initial_budget: float,
         monthly_capital_injection: float = 0.0,
         loan_term_months: int = 18,
-        monthly_interest_rate: float = 0.0,
+        annual_interest_rate: float = 0.0,
         recovery_rate: float = 0.0,
         default_collection_lag_months: int = 4,
         default_dpd_threshold_days: int = 90,
@@ -139,11 +171,11 @@ class PortfolioSimulator:
             raise ValueError("loan_term_months must be positive.")
 
         if (
-            not math.isfinite(monthly_interest_rate)
-            or monthly_interest_rate < 0
+            not math.isfinite(annual_interest_rate)
+            or annual_interest_rate < 0
         ):
             raise ValueError(
-                "monthly_interest_rate must be finite and non-negative."
+                "annual_interest_rate must be finite and non-negative."
             )
 
         if not 0.0 <= recovery_rate <= 1.0:
@@ -181,7 +213,7 @@ class PortfolioSimulator:
         )
 
         self.loan_term_months = int(loan_term_months)
-        self.monthly_interest_rate = float(monthly_interest_rate)
+        self.annual_interest_rate = float(annual_interest_rate)
         self.recovery_rate = 0.0  # Deprecated compatibility field; no permanent loss.
         self.default_collection_lag_months = int(default_collection_lag_months)
         self.default_dpd_threshold_days = int(default_dpd_threshold_days)
@@ -274,15 +306,9 @@ class PortfolioSimulator:
                 or contract.origin_month > self.month
             ):
                 continue
-            balance = contract.outstanding_principal
-            interest_due = balance * contract.monthly_interest_rate
-            if contract.remaining_months == 1:
-                principal_due = balance
-            else:
-                principal_due = min(
-                    balance,
-                    max(0.0, contract.monthly_payment - interest_due),
-                )
+            principal_due, interest_due = (
+                contract.scheduled_installment_components()
+            )
             expected_on_time_share = (
                 1.0
                 if contract.missed_installment_occurred
@@ -482,21 +508,6 @@ class PortfolioSimulator:
 
         return amount <= self.cash_available + self.EPSILON
 
-    def _calculate_monthly_payment(
-        self,
-        principal: float,
-    ) -> float:
-        """Fixed monthly instalment for a fully amortizing loan."""
-        rate = self.monthly_interest_rate
-        term = self.loan_term_months
-
-        if rate == 0:
-            return principal / term
-
-        denominator = 1.0 - (1.0 + rate) ** (-term)
-
-        return principal * rate / denominator
-
     def grant_loan(
         self,
         customer: CustomerState,
@@ -566,7 +577,19 @@ class PortfolioSimulator:
             )
         )
 
-        monthly_payment = self._calculate_monthly_payment(amount)
+        annual_interest_months = set(
+            range(1, self.loan_term_months + 1, 12)
+        )
+        principal_payment_months = tuple(
+            payment_number
+            for payment_number in range(1, self.loan_term_months + 1)
+            if payment_number not in annual_interest_months
+        )
+        if not principal_payment_months:
+            # Degenerate one-month contracts still repay principal at maturity.
+            principal_payment_months = (self.loan_term_months,)
+
+        principal_payment_amount = amount / len(principal_payment_months)
 
         contract = LoanContract(
             loan_id=self.next_loan_id,
@@ -574,8 +597,9 @@ class PortfolioSimulator:
             origin_month=self.month,
             principal=amount,
             outstanding_principal=amount,
-            monthly_payment=monthly_payment,
-            monthly_interest_rate=self.monthly_interest_rate,
+            annual_interest_rate=self.annual_interest_rate,
+            principal_payment_amount=principal_payment_amount,
+            principal_payment_months=principal_payment_months,
             monthly_hazard=monthly_hazard,
             monthly_miss_probability=monthly_miss_probability,
             default_probability_over_term=default_probability_over_term,
@@ -677,22 +701,19 @@ class PortfolioSimulator:
             if contract.origin_month >= self.month:
                 continue
 
-            balance = contract.outstanding_principal
-            interest_due = balance * contract.monthly_interest_rate
-            if contract.remaining_months == 1:
-                principal_due = balance
-            else:
-                principal_due = min(
-                    balance,
-                    max(0.0, contract.monthly_payment - interest_due),
-                )
+            principal_due, interest_due = (
+                contract.scheduled_installment_components()
+            )
 
             installment_amount = principal_due + interest_due
             missed_this_installment = False
 
             # Each loan may have one default-causing missed installment.
             # An individual installment is either paid in full or not at all.
-            if not contract.missed_installment_occurred:
+            if (
+                not contract.missed_installment_occurred
+                and installment_amount > self.EPSILON
+            ):
                 missed_this_installment = (
                     self.rng.random() < contract.monthly_miss_probability
                 )
