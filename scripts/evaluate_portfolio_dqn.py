@@ -255,11 +255,13 @@ def main():
             )
         with config_path.open("r", encoding="utf-8") as f:
             config = json.load(f)
-        if int(config.get("environment_model_version", 1)) < 7:
+        if int(config.get("environment_model_version", 1)) < PortfolioLoanEnv.ENVIRONMENT_MODEL_VERSION:
             raise ValueError(
-                f"Model {run_name} predates the current first-time applicant, "
-                "reapplication, and one-time new-to-credit state logic. Retrain it with "
-                "env/train_portfolio_dqn.py before evaluation."
+                f"Model {run_name} uses environment_model_version="
+                f"{config.get('environment_model_version', 1)}; the current environment "
+                f"requires version {PortfolioLoanEnv.ENVIRONMENT_MODEL_VERSION} because "
+                "customer-observation synchronization semantics have changed. "
+                "Retrain the model with scripts/train_portfolio_dqn.py before evaluation."
             )
         run_configs[run_name] = config
 
