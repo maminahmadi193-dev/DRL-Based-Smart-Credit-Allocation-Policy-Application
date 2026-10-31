@@ -93,9 +93,6 @@ def _make_env(config, raw_df, scaler):
         financial_reward_weight=float(config["financial_reward_weight"]),
         financial_reward_scale=float(config["financial_reward_scale"]),
         invalid_action_penalty=float(config["invalid_action_penalty"]),
-        scale_access_rewards_by_coverage=bool(
-            config["scale_access_rewards_by_coverage"]
-        ),
     )
 
 
