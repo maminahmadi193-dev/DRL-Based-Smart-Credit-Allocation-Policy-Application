@@ -302,12 +302,10 @@ class TestPortfolioLoanEnv(unittest.TestCase):
             transition_observation[CustomerState.FEATURE_COUNT + 5],
             0.0,
         )
+        # Fixed-cohort layout omits cohort_size_ratio, so the transition
+        # flag occupies portfolio feature index 6.
         self.assertEqual(
             transition_observation[CustomerState.FEATURE_COUNT + 6],
-            0.0,
-        )
-        self.assertEqual(
-            transition_observation[CustomerState.FEATURE_COUNT + 7],
             1.0,
         )
         self.assertTrue(env.observation_space.contains(transition_observation))
