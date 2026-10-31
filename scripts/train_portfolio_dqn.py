@@ -298,7 +298,7 @@ def main():
                 else "legacy"
             ),
             "environment_class": "PortfolioLoanEnv",
-            "environment_model_version": 7,
+            "environment_model_version": PortfolioLoanEnv.ENVIRONMENT_MODEL_VERSION,
             "applicant_arrival_model": "unique_first_time_rows_plus_configurable_reapplications",
             "reapplication_eligibility": "cooldown_elapsed_and_no_unresolved_overdue_installment",
             "new_to_credit_reward_policy": "one_time_until_first_simulated_contract",
