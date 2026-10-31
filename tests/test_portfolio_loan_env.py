@@ -187,6 +187,160 @@ class TestPortfolioLoanEnv(unittest.TestCase):
         self.assertEqual(info["customer_index"], expected_customer_index)
         env.close()
 
+    def test_observation_refreshes_dynamic_customer_features_from_portfolio(self):
+        env = make_env(
+            initial_budget=500_000_000,
+            applicants_per_month=2,
+            origination_months=1,
+            loan_term_months=2,
+            max_hazard=0.0,
+        )
+        env.reset(seed=42)
+
+        customer_id = env.current_row_index
+        baseline_customer = env.current_customer.copy()
+
+        # Originate a loan directly in the portfolio while the environment's
+        # local customer copy is still the pre-origination snapshot.
+        env.portfolio.grant_loan(
+            customer=baseline_customer,
+            approved_amount=100_000_000,
+            customer_id=customer_id,
+        )
+        latest_customer = env.portfolio.get_customer_state(customer_id)
+
+        self.assertGreater(
+            latest_customer.origin_amount,
+            baseline_customer.origin_amount,
+        )
+        self.assertEqual(
+            latest_customer.loan_count,
+            baseline_customer.loan_count + 1,
+        )
+
+        expected_customer = baseline_customer.copy()
+        for field_name in env.DYNAMIC_CUSTOMER_FIELDS:
+            setattr(
+                expected_customer,
+                field_name,
+                getattr(latest_customer, field_name),
+            )
+
+        expected_values = expected_customer.to_array()
+        if hasattr(env.scaler, "feature_names_in_"):
+            expected_input = pd.DataFrame(
+                [expected_values],
+                columns=env.scaler.feature_names_in_,
+            )
+        else:
+            expected_input = expected_values.reshape(1, -1)
+        expected_scaled = env.scaler.transform(expected_input)[0]
+
+        observation = env._get_observation()
+        np.testing.assert_allclose(
+            observation[:CustomerState.FEATURE_COUNT],
+            expected_scaled,
+            rtol=0.0,
+            atol=1e-6,
+        )
+
+        # The 11 static attributes must remain unchanged.
+        static_fields = (
+            "monthly_income",
+            "income_score",
+            "job_score",
+            "asset_score",
+            "total_customer_score",
+            "total_facilities",
+            "employed",
+            "score_min",
+            "score_max",
+            "risk_min",
+            "risk_max",
+        )
+        for field_name in static_fields:
+            self.assertEqual(
+                getattr(env.current_customer, field_name),
+                getattr(baseline_customer, field_name),
+            )
+
+        # The local customer copy is synchronized with all 7 dynamic fields.
+        for field_name in env.DYNAMIC_CUSTOMER_FIELDS:
+            self.assertEqual(
+                getattr(env.current_customer, field_name),
+                getattr(latest_customer, field_name),
+            )
+
+        env.close()
+
+    def test_no_applicant_observation_is_neutral_during_transition_and_settlement(self):
+        env = make_env(
+            initial_budget=100_000_000,
+            applicants_per_month=1,
+            origination_months=1,
+            loan_term_months=2,
+            annual_interest_rate=0.0,
+            max_hazard=0.0,
+        )
+        env.reset(seed=42)
+
+        transition_observation, _, terminated, _, _ = env.step(1)
+        self.assertFalse(terminated)
+        self.assertEqual(env.phase, "transition")
+        self.assertIsNone(env.current_customer)
+        self.assertIsNone(env.current_row_index)
+
+        np.testing.assert_array_equal(
+            transition_observation[:CustomerState.FEATURE_COUNT],
+            np.zeros(CustomerState.FEATURE_COUNT, dtype=np.float32),
+        )
+        self.assertEqual(
+            transition_observation[CustomerState.FEATURE_COUNT + 2],
+            0.0,
+        )
+        self.assertEqual(
+            transition_observation[CustomerState.FEATURE_COUNT + 5],
+            0.0,
+        )
+        # Fixed-cohort layout omits cohort_size_ratio, so the transition
+        # flag occupies portfolio feature index 6.
+        self.assertEqual(
+            transition_observation[CustomerState.FEATURE_COUNT + 6],
+            1.0,
+        )
+        self.assertTrue(env.observation_space.contains(transition_observation))
+
+        settlement_observation, _, terminated, _, info = env.step(0)
+        self.assertFalse(terminated)
+        self.assertEqual(env.phase, "settlement")
+        self.assertTrue(info["action_ignored"])
+        np.testing.assert_array_equal(
+            settlement_observation[:CustomerState.FEATURE_COUNT],
+            np.zeros(CustomerState.FEATURE_COUNT, dtype=np.float32),
+        )
+        self.assertEqual(
+            settlement_observation[CustomerState.FEATURE_COUNT + 2],
+            0.0,
+        )
+        self.assertEqual(
+            settlement_observation[CustomerState.FEATURE_COUNT + 5],
+            1.0,
+        )
+        self.assertEqual(
+            settlement_observation[CustomerState.FEATURE_COUNT + 6],
+            0.0,
+        )
+        self.assertTrue(env.observation_space.contains(settlement_observation))
+
+        final_observation, _, terminated, _, _ = env.step(0)
+        self.assertTrue(terminated)
+        np.testing.assert_array_equal(
+            final_observation[:CustomerState.FEATURE_COUNT],
+            np.zeros(CustomerState.FEATURE_COUNT, dtype=np.float32),
+        )
+        self.assertTrue(env.observation_space.contains(final_observation))
+        env.close()
+
     def test_budget_is_shared_between_applicants(self):
         env = make_env(
             initial_budget=100_000_000,
