@@ -88,7 +88,13 @@ def load_inputs(args):
         raise ValueError(
             f"This diagnostic requires environment model version "
             f">= {PortfolioLoanEnv.ENVIRONMENT_MODEL_VERSION}; the checkpoint "
-            "must use the synchronized customer-observation semantics."
+            "must use synchronized customer-observation and canonical "
+            "amount-sensitive reward semantics."
+        )
+    if config.get("reward_mode") != "amount_sensitive":
+        raise ValueError(
+            "Budget sensitivity requires a checkpoint trained with the canonical "
+            "amount-sensitive portfolio reward design."
         )
 
     if args.checkpoint_path:
