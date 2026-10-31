@@ -30,8 +30,8 @@ class LoanContract:
     monthly_miss_probability: float
     default_probability_over_term: float
 
-    # Incremental risk loading at origination. It decays with the share of
-    # the loan's principal exposure that remains unpaid.
+    # Incremental risk loading at origination. It follows total unpaid
+    # contractual exposure, including accrued interest on missed installments.
     risk_loading: float
 
     term_months: int
@@ -65,8 +65,9 @@ class LoanContract:
         if payment_number >= 1 and (payment_number - 1) % 12 == 0:
             interest_balance = max(0.0, self.outstanding_principal)
             if self.missed_installment_occurred and not self.late_payment_collected:
-                # A missed principal installment remains economically owed
-                # until its delayed collection is actually received.
+                # Missed principal remains in the interest-bearing balance
+                # until collected. Missed interest is also debt, but does not
+                # itself compound: annual interest is charged on principal only.
                 interest_balance += max(0.0, self.missed_principal)
             interest_due = interest_balance * self.annual_interest_rate
 
@@ -403,15 +404,16 @@ class PortfolioSimulator:
 
     def _contract_customer_exposure(self, contract: LoanContract) -> float:
         """
-        Principal still owed by this customer on one contract.
+        Total unpaid contractual debt for one loan.
 
-        The scheduled balance amortizes when an installment falls due. If that
-        installment was missed, its principal remains debt until the delayed
-        collection is actually received.
+        Outstanding principal is combined with any missed principal and
+        accrued interest that have not yet been collected. A late collection
+        clears both overdue components from customer exposure.
         """
         exposure = max(0.0, float(contract.outstanding_principal))
         if contract.missed_installment_occurred and not contract.late_payment_collected:
             exposure += max(0.0, float(contract.missed_principal))
+            exposure += max(0.0, float(contract.missed_interest))
         return max(0.0, exposure)
 
     def _refresh_customer_state(self, customer_id: CustomerId) -> Optional[CustomerState]:
@@ -458,10 +460,12 @@ class PortfolioSimulator:
         for contract in contracts:
             if contract.principal <= 0.0:
                 continue
-            exposure_share = min(
-                1.0,
+            # Accrued unpaid interest can make total contractual exposure
+            # temporarily exceed original principal; retain that increment
+            # in risk until the overdue interest is collected.
+            exposure_share = (
                 self._contract_customer_exposure(contract)
-                / float(contract.principal),
+                / float(contract.principal)
             )
             risk_loading += max(0.0, float(contract.risk_loading)) * exposure_share
 
