@@ -304,6 +304,10 @@ class TestPortfolioLoanEnv(unittest.TestCase):
         )
         self.assertEqual(
             transition_observation[CustomerState.FEATURE_COUNT + 6],
+            0.0,
+        )
+        self.assertEqual(
+            transition_observation[CustomerState.FEATURE_COUNT + 7],
             1.0,
         )
         self.assertTrue(env.observation_space.contains(transition_observation))
