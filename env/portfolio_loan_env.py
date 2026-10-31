@@ -34,6 +34,10 @@ class PortfolioLoanEnv(gym.Env):
 
     metadata = {"render_modes": []}
 
+    # Increment when observation or transition semantics change in a way
+    # that makes previously trained checkpoints incompatible.
+    ENVIRONMENT_MODEL_VERSION = 8
+
     CUSTOMER_FEATURE_COUNT = CustomerState.FEATURE_COUNT
     PORTFOLIO_FEATURE_COUNT = 16
 
