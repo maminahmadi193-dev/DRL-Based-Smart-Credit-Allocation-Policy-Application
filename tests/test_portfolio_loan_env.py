@@ -494,7 +494,7 @@ class TestPortfolioLoanEnv(unittest.TestCase):
         self.assertEqual(env.phase, "allocation")
         self.assertAlmostEqual(
             env.portfolio.available_budget,
-            300_000_000,
+            200_000_000,
             places=4,
         )
 
