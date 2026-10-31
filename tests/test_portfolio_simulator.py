@@ -533,7 +533,6 @@ class TestPortfolioSimulator(unittest.TestCase):
                 total_principal = 0.0
                 total_interest = 0.0
                 for payment_number in range(1, term + 1):
-                    result = portfolio.advance_month()
                     expected_principal = (
                         0.0
                         if payment_number in interest_months
@@ -543,6 +542,18 @@ class TestPortfolioSimulator(unittest.TestCase):
                         payment_number,
                         0.0,
                     )
+                    expected_collection = expected_principal + expected_interest
+
+                    # The observation forecast must match the next contractual
+                    # collection when every installment is paid on time.
+                    self.assertAlmostEqual(
+                        portfolio.expected_cash_collections_next_month,
+                        expected_collection,
+                        delta=0.02,
+                    )
+                    cash_before = portfolio.available_budget
+                    result = portfolio.advance_month()
+
                     self.assertAlmostEqual(
                         result.principal_collected,
                         expected_principal,
@@ -551,6 +562,17 @@ class TestPortfolioSimulator(unittest.TestCase):
                     self.assertAlmostEqual(
                         result.interest_collected,
                         expected_interest,
+                        delta=0.02,
+                    )
+                    # Principal affects liquidity; only realized interest is P&L.
+                    self.assertAlmostEqual(
+                        result.financial_pnl,
+                        expected_interest,
+                        delta=0.02,
+                    )
+                    self.assertAlmostEqual(
+                        result.cash_after,
+                        cash_before + expected_collection,
                         delta=0.02,
                     )
                     total_principal += result.principal_collected
@@ -562,8 +584,118 @@ class TestPortfolioSimulator(unittest.TestCase):
                     sum(expected_interest_by_payment.values()),
                     delta=0.02,
                 )
+                self.assertAlmostEqual(
+                    portfolio.available_budget,
+                    principal + total_interest,
+                    delta=0.02,
+                )
                 self.assertEqual(contract.status, "matured")
 
+
+    def test_annual_interest_includes_uncollected_missed_principal(self):
+        principal = 100_000_000
+        principal_installment = principal / 16.0
+        portfolio = make_portfolio(
+            budget=principal,
+            term=18,
+            annual_rate=0.04,
+            collection_lag=4,
+            max_hazard=0.0,
+        )
+        portfolio.advance_month()
+        contract = portfolio.grant_loan(
+            make_customer(),
+            principal,
+            customer_id=18,
+        )
+
+        # Pay payment months 1..11 on time: one annual-interest payment and
+        # ten principal installments have been collected.
+        for _ in range(11):
+            portfolio.advance_month()
+        self.assertAlmostEqual(
+            contract.outstanding_principal,
+            principal - 10 * principal_installment,
+            delta=0.02,
+        )
+
+        # Miss principal installment 12. It remains part of the customer's
+        # outstanding exposure until the delayed collection is received.
+        contract.monthly_miss_probability = 1.0
+        missed = portfolio.advance_month()
+        self.assertAlmostEqual(missed.principal_collected, 0.0, delta=0.02)
+        self.assertAlmostEqual(
+            missed.delayed_payment_amount_scheduled,
+            principal_installment,
+            delta=0.02,
+        )
+        self.assertAlmostEqual(
+            portfolio.pending_delayed_principal,
+            principal_installment,
+            delta=0.02,
+        )
+
+        # Payment month 13 occurs before the four-month-late principal is
+        # collected, so annual interest is based on both scheduled balance
+        # and the still-unpaid principal installment.
+        expected_annual_interest = (
+            contract.outstanding_principal + principal_installment
+        ) * 0.04
+        self.assertAlmostEqual(
+            portfolio.expected_cash_collections_next_month,
+            expected_annual_interest,
+            delta=0.02,
+        )
+        annual_interest = portfolio.advance_month()
+        self.assertAlmostEqual(annual_interest.principal_collected, 0.0, delta=0.02)
+        self.assertAlmostEqual(
+            annual_interest.interest_collected,
+            expected_annual_interest,
+            delta=0.02,
+        )
+        self.assertAlmostEqual(
+            annual_interest.financial_pnl,
+            expected_annual_interest,
+            delta=0.02,
+        )
+
+        # The late principal is due in the same month as scheduled installment
+        # 16. The next-month forecast must include both cash receipts.
+        portfolio.advance_month()  # Payment 14
+        portfolio.advance_month()  # Payment 15
+        expected_combined_receipt = 2.0 * principal_installment
+        self.assertAlmostEqual(
+            portfolio.expected_cash_collections_next_month,
+            expected_combined_receipt,
+            delta=0.02,
+        )
+        late_collection = portfolio.advance_month()  # Payment 16
+        self.assertAlmostEqual(
+            late_collection.principal_collected,
+            expected_combined_receipt,
+            delta=0.02,
+        )
+        self.assertAlmostEqual(
+            late_collection.delayed_payment_amount_collected,
+            principal_installment,
+            delta=0.02,
+        )
+        self.assertTrue(contract.late_payment_collected)
+
+        portfolio.advance_month()  # Payment 17
+        portfolio.advance_month()  # Payment 18
+        self.assertEqual(contract.status, "matured")
+        self.assertTrue(portfolio.is_fully_settled)
+        self.assertAlmostEqual(
+            portfolio.cumulative_principal_collected,
+            principal,
+            delta=0.02,
+        )
+        self.assertAlmostEqual(
+            portfolio.cumulative_interest_collected,
+            4_000_000.0 + expected_annual_interest,
+            delta=0.02,
+        )
 
 
 if __name__ == "__main__":
