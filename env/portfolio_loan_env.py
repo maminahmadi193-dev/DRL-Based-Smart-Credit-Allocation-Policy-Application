@@ -36,7 +36,7 @@ class PortfolioLoanEnv(gym.Env):
 
     # Increment when observation or transition semantics change in a way
     # that makes previously trained checkpoints incompatible.
-    ENVIRONMENT_MODEL_VERSION = 8
+    ENVIRONMENT_MODEL_VERSION = 9
 
     CUSTOMER_FEATURE_COUNT = CustomerState.FEATURE_COUNT
     PORTFOLIO_FEATURE_COUNT = 16
@@ -228,10 +228,9 @@ class PortfolioLoanEnv(gym.Env):
         self.origination_months = int(origination_months)
         self.loan_term_months = int(loan_term_months)
 
-        # The public configuration uses a nominal annual rate; the
-        # amortization engine operates on a monthly rate.
+        # The nominal annual rate is charged only in payment months
+        # 1, 13, 25, ...; it is not divided into monthly interest.
         self.annual_interest_rate = float(annual_interest_rate)
-        self.monthly_interest_rate = self.annual_interest_rate / 12.0
 
         self.social_reward_weight = float(
             social_reward_weight
@@ -764,7 +763,7 @@ class PortfolioLoanEnv(gym.Env):
                 self.monthly_capital_injection
             ),
             loan_term_months=self.loan_term_months,
-            monthly_interest_rate=self.monthly_interest_rate,
+            annual_interest_rate=self.annual_interest_rate,
             default_collection_lag_months=self.default_collection_lag_months,
             default_dpd_threshold_days=self.default_dpd_threshold_days,
             customer_simulator=CustomerSimulator(
