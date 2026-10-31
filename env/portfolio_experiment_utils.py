@@ -20,8 +20,6 @@ FEATURE_COLUMNS = [
     "DebtAmount",
     "OriginAmount",
     "LoanCounts",
-    "DebtRatio",
-    "DebtPerLoan",
     "Has_No_History",
     "Employed",
     "Score_Min",
@@ -50,6 +48,59 @@ REQUIRED_RAW_COLUMNS = [
     "Risk_Min",
     "Risk_Max",
 ]
+
+
+def normalize_customer_financial_features(frame: pd.DataFrame) -> pd.DataFrame:
+    """
+    Normalize financial source fields and rebuild derived debt features.
+
+    This matches PortfolioLoanEnv._row_to_customer_state so scaler fitting,
+    risk calibration, and runtime observations use identical values.
+    """
+    required = ["DebtAmount", "OriginAmount", "LoanCounts"]
+    missing = sorted(set(required) - set(frame.columns))
+    if missing:
+        raise ValueError(
+            f"Customer financial normalization is missing columns: {missing}"
+        )
+
+    normalized = frame.copy()
+    debt = np.maximum(
+        normalized["DebtAmount"].to_numpy(dtype=float),
+        0.0,
+    )
+    origin_amount = np.maximum(
+        normalized["OriginAmount"].to_numpy(dtype=float),
+        0.0,
+    )
+    loan_counts = np.maximum(
+        np.trunc(normalized["LoanCounts"].to_numpy(dtype=float)),
+        0.0,
+    ).astype(np.int64)
+
+    normalized["DebtAmount"] = debt
+    normalized["OriginAmount"] = origin_amount
+    normalized["LoanCounts"] = loan_counts
+
+    if "TotalFacilities" in normalized.columns:
+        normalized["TotalFacilities"] = np.maximum(
+            normalized["TotalFacilities"].to_numpy(dtype=float),
+            0.0,
+        )
+
+    normalized["DebtRatio"] = np.divide(
+        debt,
+        origin_amount,
+        out=np.zeros_like(debt, dtype=float),
+        where=origin_amount > 0.0,
+    )
+    normalized["DebtPerLoan"] = np.divide(
+        debt,
+        loan_counts,
+        out=np.zeros_like(debt, dtype=float),
+        where=loan_counts > 0,
+    )
+    return normalized
 
 
 def project_root() -> Path:
@@ -112,6 +163,10 @@ def load_split_and_scaler(data_path=None, split_seed=42):
     if df.empty:
         raise ValueError(f"No complete usable rows found in {source_path}")
 
+    # Rebuild debt-derived columns before splitting and fitting the scaler.
+    # Runtime customer states use these same normalized financial values.
+    df = normalize_customer_financial_features(df)
+
     all_indices = np.arange(len(df))
     train_idx, temporary_idx = train_test_split(
         all_indices,
@@ -165,7 +220,7 @@ def reference_risk_scores_after_loan(
 
     required = [
         "MountlyIncome", "DebtAmount", "OriginAmount", "LoanCounts",
-        "DebtRatio", "DebtPerLoan", "Risk_Min", "Risk_Max",
+        "Risk_Min", "Risk_Max",
     ]
     missing = sorted(set(required) - set(raw_df.columns))
     if missing:
@@ -173,12 +228,13 @@ def reference_risk_scores_after_loan(
 
     amount = float(reference_loan_amount)
     risk_simulator = CustomerSimulator()
-    income = raw_df["MountlyIncome"].to_numpy(dtype=float)
-    debt = raw_df["DebtAmount"].to_numpy(dtype=float)
-    origin_amount = raw_df["OriginAmount"].to_numpy(dtype=float)
-    loan_counts = raw_df["LoanCounts"].to_numpy(dtype=float).astype(int)
-    previous_debt_ratio = raw_df["DebtRatio"].to_numpy(dtype=float)
-    previous_debt_per_loan = raw_df["DebtPerLoan"].to_numpy(dtype=float)
+    normalized = normalize_customer_financial_features(raw_df)
+    income = normalized["MountlyIncome"].to_numpy(dtype=float)
+    debt = normalized["DebtAmount"].to_numpy(dtype=float)
+    origin_amount = normalized["OriginAmount"].to_numpy(dtype=float)
+    loan_counts = normalized["LoanCounts"].to_numpy(dtype=np.int64)
+    previous_debt_ratio = normalized["DebtRatio"].to_numpy(dtype=float)
+    previous_debt_per_loan = normalized["DebtPerLoan"].to_numpy(dtype=float)
     initial_risk = (
         raw_df["Risk_Min"].to_numpy(dtype=float)
         + raw_df["Risk_Max"].to_numpy(dtype=float)
@@ -200,24 +256,37 @@ def reference_risk_scores_after_loan(
         where=updated_loan_counts > 0,
     )
 
-    debt_ratio_change = updated_debt_ratio - previous_debt_ratio
+    # Mirror CustomerSimulator._update_risk exactly: only positive
+    # debt-ratio and relative debt-per-loan changes increase risk.
+    debt_ratio_change = np.maximum(
+        0.0,
+        updated_debt_ratio - previous_debt_ratio,
+    )
     debt_per_loan_change = np.zeros_like(updated_debt_per_loan)
     has_previous_average = previous_debt_per_loan > 0.0
-    debt_per_loan_change[has_previous_average] = (
-        (updated_debt_per_loan[has_previous_average]
-         - previous_debt_per_loan[has_previous_average])
-        / previous_debt_per_loan[has_previous_average]
+    debt_per_loan_change[has_previous_average] = np.maximum(
+        0.0,
+        (
+            updated_debt_per_loan[has_previous_average]
+            - previous_debt_per_loan[has_previous_average]
+        ) / previous_debt_per_loan[has_previous_average],
+    )
+    debt_per_loan_change[~has_previous_average] = np.clip(
+        updated_debt_per_loan[~has_previous_average] / 500_000_000.0,
+        0.0,
+        1.0,
     )
     capacity_pressure = np.ones_like(income)
     has_income = income > 0.0
     capacity_pressure[has_income] = amount / (income[has_income] + amount)
 
-    updated_risk = (
-        initial_risk
-        + risk_simulator.alpha * debt_ratio_change
+    delta_risk = np.maximum(
+        0.0,
+        risk_simulator.alpha * debt_ratio_change
         + risk_simulator.beta * debt_per_loan_change
-        + risk_simulator.gamma * capacity_pressure
+        + risk_simulator.gamma * capacity_pressure,
     )
+    updated_risk = initial_risk + delta_risk
     return np.clip(updated_risk, 0.0, 100.0)
 
 
