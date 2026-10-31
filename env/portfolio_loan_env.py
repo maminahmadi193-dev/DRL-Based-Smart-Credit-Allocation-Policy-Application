@@ -37,6 +37,19 @@ class PortfolioLoanEnv(gym.Env):
     CUSTOMER_FEATURE_COUNT = CustomerState.FEATURE_COUNT
     PORTFOLIO_FEATURE_COUNT = 16
 
+    # These fields evolve as the customer's simulated contracts are
+    # originated and serviced. The remaining customer features are static
+    # attributes inherited from the empirical source row.
+    DYNAMIC_CUSTOMER_FIELDS = (
+        "debt",
+        "origin_amount",
+        "loan_count",
+        "debt_ratio",
+        "debt_per_loan",
+        "has_no_history",
+        "risk",
+    )
+
     ACTION_AMOUNTS = (
         0,
         100_000_000,
@@ -518,9 +531,45 @@ class PortfolioLoanEnv(gym.Env):
             dtype=np.float32,
         )
 
-    def _get_observation(self):
+    def _get_scaled_customer_features(self):
+        """
+        Build the fixed-width customer part of the observation.
+
+        During allocation, retain the 11 empirical baseline attributes and
+        refresh the 7 dynamic attributes from the portfolio's latest state.
+        During transition/settlement there is no active applicant, so expose
+        an all-zero sentinel in scaled feature space.
+        """
+        if self.phase != "allocation":
+            return np.zeros(
+                self.CUSTOMER_FEATURE_COUNT,
+                dtype=np.float32,
+            )
+
+        if self.current_customer is None or self.current_row_index is None:
+            raise RuntimeError(
+                "Allocation phase requires an active applicant."
+            )
+
+        latest_customer_state = self.portfolio.get_customer_state(
+            self.current_row_index
+        )
+        if latest_customer_state is None:
+            raise RuntimeError(
+                "The active applicant is missing from the portfolio state."
+            )
+
+        # Synchronize only the dynamic fields. Static customer attributes
+        # remain those loaded from the empirical source row.
+        for field_name in self.DYNAMIC_CUSTOMER_FIELDS:
+            setattr(
+                self.current_customer,
+                field_name,
+                getattr(latest_customer_state, field_name),
+            )
+
         customer_values = self.current_customer.to_array()
-        
+
         if hasattr(self.scaler, "feature_names_in_"):
             customer_input = pd.DataFrame(
                 [customer_values],
@@ -529,10 +578,12 @@ class PortfolioLoanEnv(gym.Env):
         else:
             customer_input = customer_values.reshape(1, -1)
 
-        scaled_customer = self.scaler.transform(
+        return self.scaler.transform(
             customer_input
         )[0].astype(np.float32)
 
+    def _get_observation(self):
+        scaled_customer = self._get_scaled_customer_features()
 
         budget_scale = max(self.initial_budget, 1.0)
 
@@ -553,6 +604,8 @@ class PortfolioLoanEnv(gym.Env):
         position_fraction = (
             self.current_applicant_position
             / max(len(self.current_cohort_indices), 1)
+            if self.phase == "allocation"
+            else 0.0
         )
 
         settlement_flag = float(self.phase == "settlement")
@@ -947,9 +1000,18 @@ class PortfolioLoanEnv(gym.Env):
         else:
             # End the applicant decision phase first. Monthly repayment and
             # default events will occur on a separate transition step, where
-            # no credit-allocation action is taken.
+            # no credit-allocation action is taken. The final applicant's
+            # decision details have already been captured above; clear the
+            # active-applicant context so the next observation cannot reuse
+            # that customer's stale feature vector.
             self._transition_after_allocation_month = self.portfolio.month
             self.phase = "transition"
+            self.current_customer = None
+            self.current_row_index = None
+            self.current_is_reapplication = False
+            self.current_prior_application_count = 0
+            self.current_cohort_indices = np.array([], dtype=int)
+            self.current_applicant_position = 0
             terminated = False
             truncated = False
 
