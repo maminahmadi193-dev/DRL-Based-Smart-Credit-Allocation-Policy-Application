@@ -1,10 +1,10 @@
 """Train DQN on the portfolio-level credit-allocation environment.
 
 Examples from the repository root:
-    python scripts/train_portfolio_dqn.py --run-name portfolio_dqn_legacy --timesteps 5000
-    python scripts/train_portfolio_dqn.py --run-name portfolio_dqn_amount_sensitive --timesteps 5000 --scale-access-rewards-by-coverage
+    python scripts/train_portfolio_dqn.py --run-name portfolio_dqn_amount_sensitive_smoke --timesteps 5000
 
-Use the short runs above as pipeline smoke tests first. For a full run, increase
+The portfolio training pipeline uses one fixed amount-sensitive reward design.
+Use a short run as a pipeline smoke test first. For a full run, increase
 --timesteps after verifying the output and evaluation scripts.
 """
 
@@ -148,14 +148,7 @@ def main():
         output_root = root / output_root
     output_root.mkdir(parents=True, exist_ok=True)
 
-    run_name = args.run_name
-    if not run_name:
-        mode_name = (
-            "amount_sensitive"
-            if args.scale_access_rewards_by_coverage
-            else "legacy"
-        )
-        run_name = f"portfolio_dqn_{mode_name}"
+    run_name = args.run_name or "portfolio_dqn_amount_sensitive"
 
     run_dir = output_root / run_name
     if run_dir.exists() and (run_dir / "model.zip").exists():
