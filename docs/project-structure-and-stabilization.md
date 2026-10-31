@@ -75,6 +75,10 @@ These preserve earlier experiment workflows. Their training calculations, evalua
 
 These files are not marked for deletion. Review their usage and historical role separately before considering any removal.
 
+## 3. Portfolio reward design
+
+The portfolio-level pipeline now has one fixed amount-sensitive social reward. `RewardEngine` and `PortfolioLoanEnv` do not expose a Legacy/experimental selector. Training writes `reward_mode: amount_sensitive`; evaluation and diagnostics use that same formula. The historical amount-independent access bonus is isolated in `LegacySingleCustomerRewardEngine` for the older single-customer `LoanEnv` and legacy classifier workflow. Environment model version 12 marks the reward-semantics change; pre-v12 portfolio checkpoints must be retrained before evaluation.
+
 ## 3. Generated files and artifacts
 
 The local `models/portfolio_dqn/` tree contains multiple training runs, checkpoints, and run configurations. The local `models/results/` tree contains budget sensitivity and other evaluation outputs. They should remain on the workstations, not be committed as a bulk directory.
