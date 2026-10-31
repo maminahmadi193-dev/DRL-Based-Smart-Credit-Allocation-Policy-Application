@@ -281,9 +281,6 @@ def evaluate_one_episode(policy: str, episode: int, seed: int, df: pd.DataFrame,
         financial_reward_weight=args.financial_reward_weight,
         financial_reward_scale=args.financial_reward_scale,
         invalid_action_penalty=args.invalid_action_penalty,
-        scale_access_rewards_by_coverage=(
-            args.scale_access_rewards_by_coverage
-        ),
     )
     env.reset(seed=seed)
     # Keep policy randomness separate from the environment's seeded RNG.
@@ -446,14 +443,6 @@ def parse_args():
     parser.add_argument("--target-annual-default-rate", type=float, default=0.013)
     parser.add_argument("--reference-loan-amount", type=float, default=100_000_000)
     parser.add_argument("--social-reward-weight", type=float, default=1.0)
-    parser.add_argument(
-        "--scale-access-rewards-by-coverage",
-        action="store_true",
-        help=(
-            "Experimental design: scale history and credit-limit access "
-            "rewards by estimated-need coverage."
-        ),
-    )
     parser.add_argument("--financial-reward-weight", type=float, default=1.0)
     parser.add_argument("--financial-reward-scale", type=float, default=100_000_000)
     parser.add_argument("--invalid-action-penalty", type=float, default=0.25)
@@ -577,10 +566,7 @@ def main():
     print("Payment behavior         : complete installment paid or missed")
     print("Permanent credit loss    : disabled (missed installments are eventually collected in full)")
     print(f"Social reward weight     : {args.social_reward_weight}")
-    print(
-        "Reward design            : "
-        + ("amount-sensitive access rewards" if args.scale_access_rewards_by_coverage else "legacy access rewards")
-    )
+    print("Reward design            : amount-sensitive access rewards")
     print(f"Financial reward weight  : {args.financial_reward_weight}")
     if args.annual_interest_rate == 0.0 and args.max_hazard == 0.0:
         print("NOTE: Interest and missed-installment events are both disabled for this run.")

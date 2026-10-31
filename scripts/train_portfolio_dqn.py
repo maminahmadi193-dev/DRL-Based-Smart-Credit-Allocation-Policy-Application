@@ -32,11 +32,6 @@ def parse_args():
     )
     parser.add_argument("--data", default=None, help="Path to df_cleaned.csv; auto-detected if omitted.")
     parser.add_argument("--run-name", default=None, help="Unique name for this model/run.")
-    parser.add_argument(
-        "--scale-access-rewards-by-coverage",
-        action="store_true",
-        help="Use the experimental, amount-sensitive social reward design.",
-    )
     parser.add_argument("--timesteps", type=int, default=420_000)
     parser.add_argument("--seed", type=int, default=42, help="DQN and environment seed.")
     parser.add_argument("--split-seed", type=int, default=42, help="Seed for the fixed 70/10/20 data split.")
@@ -216,7 +211,6 @@ def main():
         financial_reward_weight=args.financial_reward_weight,
         financial_reward_scale=args.financial_reward_scale,
         invalid_action_penalty=args.invalid_action_penalty,
-        scale_access_rewards_by_coverage=args.scale_access_rewards_by_coverage,
     )
 
     model = DQN(
@@ -256,7 +250,7 @@ def main():
     print(f"Validation rows        : {split_info['validation_rows']:,}")
     print(f"Test rows              : {split_info['test_rows']:,}")
     print(f"Run name               : {run_name}")
-    print(f"Reward design          : {'amount-sensitive' if args.scale_access_rewards_by_coverage else 'legacy'}")
+    print("Reward design          : amount-sensitive")
     print(f"Training timesteps     : {args.timesteps:,}")
     print(f"Seed                   : {args.seed}")
     print(f"Initial budget         : {args.initial_budget:,.0f}")
@@ -292,11 +286,7 @@ def main():
         config.update({
             "run_name": run_name,
             "model_path": str(model_path.with_suffix(".zip").resolve()),
-            "reward_mode": (
-                "amount_sensitive"
-                if args.scale_access_rewards_by_coverage
-                else "legacy"
-            ),
+            "reward_mode": "amount_sensitive",
             "environment_class": "PortfolioLoanEnv",
             "environment_model_version": PortfolioLoanEnv.ENVIRONMENT_MODEL_VERSION,
             "applicant_arrival_model": "unique_first_time_rows_plus_configurable_reapplications",

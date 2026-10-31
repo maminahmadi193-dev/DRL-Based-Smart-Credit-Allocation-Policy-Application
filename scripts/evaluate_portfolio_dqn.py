@@ -70,16 +70,13 @@ def evaluate_episode(run_name, model, config, raw_df, scaler, episode, seed):
         financial_reward_weight=float(config["financial_reward_weight"]),
         financial_reward_scale=float(config["financial_reward_scale"]),
         invalid_action_penalty=float(config["invalid_action_penalty"]),
-        scale_access_rewards_by_coverage=bool(config["scale_access_rewards_by_coverage"]),
     )
 
-    legacy_engine = RewardEngine(scale_access_rewards_by_coverage=False)
-    experimental_engine = RewardEngine(scale_access_rewards_by_coverage=True)
+    reward_engine = RewardEngine()
 
     obs, _ = env.reset(seed=seed)
     total_reward_as_trained = 0.0
-    total_legacy_social = 0.0
-    total_experimental_social = 0.0
+    total_social_reward = 0.0
     action_counts = np.zeros(len(env.ACTION_AMOUNTS), dtype=np.int64)
     approved_action_counts = np.zeros(len(env.ACTION_AMOUNTS), dtype=np.int64)
     invalid_actions = 0
@@ -115,10 +112,7 @@ def evaluate_episode(run_name, model, config, raw_df, scaler, episode, seed):
             approved_amount = float(info.get("approved_amount", 0.0))
             if approved_amount > 0:
                 approved_action_counts[action_index] += 1
-                total_legacy_social += legacy_engine._social_reward(
-                    customer_before_action, approved_amount
-                )
-                total_experimental_social += experimental_engine._social_reward(
+                total_social_reward += reward_engine._social_reward(
                     customer_before_action, approved_amount
                 )
             if bool(info.get("invalid_action", False)):
@@ -149,11 +143,8 @@ def evaluate_episode(run_name, model, config, raw_df, scaler, episode, seed):
         - total_recognized_default_penalty
         - invalid_penalty * invalid_actions
     )
-    total_reward_legacy = (
-        social_weight * total_legacy_social + shared_non_social_reward
-    )
-    total_reward_experimental = (
-        social_weight * total_experimental_social + shared_non_social_reward
+    total_reward_amount_sensitive = (
+        social_weight * total_social_reward + shared_non_social_reward
     )
 
     result = {
@@ -165,10 +156,8 @@ def evaluate_episode(run_name, model, config, raw_df, scaler, episode, seed):
         "reapplication_share": float(config.get("reapplication_share", 0.10)),
         "reapplication_cooldown_months": int(config.get("reapplication_cooldown_months", 3)),
         "total_reward_as_trained": total_reward_as_trained,
-        "total_reward_under_legacy_formula": total_reward_legacy,
-        "total_reward_under_amount_sensitive_formula": total_reward_experimental,
-        "social_reward_legacy": total_legacy_social,
-        "social_reward_amount_sensitive": total_experimental_social,
+        "total_reward_amount_sensitive": total_reward_amount_sensitive,
+        "social_reward": total_social_reward,
         "financial_pnl": financial_pnl,
         "total_risk_penalty": total_risk_penalty,
         "total_recognized_default_penalty": total_recognized_default_penalty,
@@ -321,17 +310,14 @@ def main():
             print(
                 f"  episode {episode + 1}/{args.episodes} | seed={seed} | "
                 f"loans={result['loans_granted']} | "
-                f"legacy reward={result['total_reward_under_legacy_formula']:.3f} | "
-                f"experimental reward={result['total_reward_under_amount_sensitive_formula']:.3f}"
+                f"amount-sensitive reward={result['total_reward_amount_sensitive']:.3f}"
             )
 
     episodes_df = pd.DataFrame(episode_rows)
     numeric_metrics = [
         "total_reward_as_trained",
-        "total_reward_under_legacy_formula",
-        "total_reward_under_amount_sensitive_formula",
-        "social_reward_legacy",
-        "social_reward_amount_sensitive",
+        "total_reward_amount_sensitive",
+        "social_reward",
         "total_risk_penalty",
         "total_recognized_default_penalty",
         "financial_pnl",
@@ -387,8 +373,7 @@ def main():
     display_columns = [
         "run_name",
         "reward_mode_used_for_training",
-        "mean_total_reward_under_legacy_formula",
-        "mean_total_reward_under_amount_sensitive_formula",
+        "mean_total_reward_amount_sensitive",
         "mean_total_risk_penalty",
         "mean_total_recognized_default_penalty",
         "mean_financial_pnl",

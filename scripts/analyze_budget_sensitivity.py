@@ -167,12 +167,6 @@ def make_env(config, raw_df, scaler, budget):
         invalid_action_penalty=float(
             config.get("invalid_action_penalty", 0.25)
         ),
-        scale_access_rewards_by_coverage=bool(
-            config.get(
-                "scale_access_rewards_by_coverage",
-                config.get("reward_mode") == "amount_sensitive",
-            )
-        ),
         risk_weight=float(config.get("risk_weight", 1.0)),
         default_cost=float(config.get("default_cost", 10.0)),
     )
