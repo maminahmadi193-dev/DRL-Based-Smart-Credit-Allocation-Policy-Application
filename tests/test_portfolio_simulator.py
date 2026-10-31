@@ -34,7 +34,7 @@ def make_customer():
 def make_portfolio(
     budget=1_000_000,
     term=3,
-    rate=0.0,
+    annual_rate=0.0,
     collection_lag=4,
     max_hazard=0.0,
     seed=42,
@@ -43,7 +43,7 @@ def make_portfolio(
         initial_budget=budget,
         monthly_capital_injection=0,
         loan_term_months=term,
-        monthly_interest_rate=rate,
+        annual_interest_rate=annual_rate,
         default_collection_lag_months=collection_lag,
         customer_simulator=CustomerSimulator(max_hazard=max_hazard),
         rng=np.random.default_rng(seed),
@@ -100,7 +100,7 @@ class TestPortfolioSimulator(unittest.TestCase):
         portfolio = make_portfolio(
             budget=1_000_000,
             term=3,
-            rate=0,
+            annual_rate=0.0,
             max_hazard=0.0,
         )
         portfolio.advance_month()
@@ -111,25 +111,20 @@ class TestPortfolioSimulator(unittest.TestCase):
             customer_id=1,
         )
 
-        # No repayment occurs at the moment of origination.
-        self.assertEqual(portfolio.available_budget, 700_000)
-        self.assertAlmostEqual(
-            contract.monthly_payment,
-            100_000,
-        )
+        # A three-month contract has one interest-only month and two
+        # equal principal installments.
+        self.assertAlmostEqual(contract.principal_payment_amount, 150_000)
+        self.assertEqual(contract.principal_payment_months, (2, 3))
 
-        expected_balances = [200_000, 100_000, 0]
-
-        # First repayment is processed in month 2.
-        for expected_balance in expected_balances:
+        expected = [
+            (0.0, 0.0, 300_000.0),
+            (150_000.0, 0.0, 150_000.0),
+            (150_000.0, 0.0, 0.0),
+        ]
+        for expected_principal, expected_interest, expected_balance in expected:
             result = portfolio.advance_month()
-
-            self.assertAlmostEqual(
-                result.principal_collected,
-                100_000,
-                places=5,
-            )
-
+            self.assertAlmostEqual(result.principal_collected, expected_principal)
+            self.assertAlmostEqual(result.interest_collected, expected_interest)
             self.assertAlmostEqual(
                 contract.outstanding_principal,
                 expected_balance,
@@ -138,58 +133,64 @@ class TestPortfolioSimulator(unittest.TestCase):
 
         self.assertEqual(contract.status, "matured")
         self.assertEqual(portfolio.active_contract_count, 0)
-        self.assertAlmostEqual(
-            portfolio.available_budget,
-            1_000_000,
-            places=5,
-        )
+        self.assertAlmostEqual(portfolio.available_budget, 1_000_000, places=5)
 
     def test_missed_installment_is_full_or_zero_and_eventually_collected(self):
         portfolio = make_portfolio(
             budget=1_000_000,
             term=3,
-            rate=0.0,
+            annual_rate=0.0,
             collection_lag=4,
-            max_hazard=1_000.0,  # Force the first eligible installment to be missed.
+            max_hazard=0.0,
         )
         portfolio.advance_month()
-        portfolio.grant_loan(make_customer(), 300_000, customer_id=1)
+        contract = portfolio.grant_loan(
+            make_customer(),
+            300_000,
+            customer_id=1,
+        )
 
-        # Month 2: the complete 100k installment is missed; zero is collected.
+        # Payment 1 is an interest-only month. With a zero rate, no amount
+        # is due and there is no monetary installment to miss.
         result = portfolio.advance_month()
         self.assertAlmostEqual(result.principal_collected, 0.0)
-        self.assertAlmostEqual(result.delayed_payment_amount_scheduled, 100_000)
+        self.assertAlmostEqual(result.interest_collected, 0.0)
+        self.assertEqual(result.missed_installment_count, 0.0)
+
+        # Force the next (principal) installment to be missed.
+        contract.monthly_miss_probability = 1.0
+        result = portfolio.advance_month()
+        self.assertAlmostEqual(result.principal_collected, 0.0)
+        self.assertAlmostEqual(result.delayed_payment_amount_scheduled, 150_000)
         self.assertEqual(result.missed_installment_count, 1.0)
         self.assertEqual(result.recognized_default_count, 0.0)
-        self.assertAlmostEqual(result.pending_delayed_receivables, 100_000)
+        self.assertAlmostEqual(result.pending_delayed_receivables, 150_000)
         self.assertAlmostEqual(portfolio.available_budget, 700_000)
-        contract = portfolio.contracts[0]
         self.assertTrue(contract.missed_installment_occurred)
         self.assertFalse(contract.default_recognized)
 
-        # The one missed installment is a single event; the later installments
-        # are paid in full on their contractual due dates.
+        # The final scheduled principal installment is paid on time.
         result = portfolio.advance_month()
-        self.assertAlmostEqual(result.principal_collected, 100_000)
+        self.assertAlmostEqual(result.principal_collected, 150_000)
         self.assertAlmostEqual(result.delayed_payment_amount_scheduled, 0.0)
-        result = portfolio.advance_month()
-        self.assertAlmostEqual(result.principal_collected, 100_000)
         self.assertEqual(contract.status, "matured")
         self.assertFalse(portfolio.is_fully_settled)
 
-        # At month 6, the installment is >90 DPD; default is recognized before
-        # the same-month full collection of the overdue amount.
-        portfolio.advance_month()
-        self.assertEqual(portfolio.month, 5)
+        # The missed March installment is over 90 days past due in June.
+        portfolio.advance_month()  # month 5
         self.assertFalse(contract.default_recognized)
-        result = portfolio.advance_month()
-        self.assertEqual(portfolio.month, 6)
+        result = portfolio.advance_month()  # month 6
         self.assertTrue(contract.default_recognized)
         self.assertEqual(result.expected_default_count, 1.0)
         self.assertEqual(result.recognized_default_count, 1.0)
-        self.assertAlmostEqual(result.principal_collected, 100_000)
+        self.assertAlmostEqual(result.principal_collected, 0.0)
+        self.assertFalse(contract.late_payment_collected)
+        self.assertAlmostEqual(portfolio.pending_delayed_receivables, 150_000)
+
+        result = portfolio.advance_month()  # month 7: full delayed collection
         self.assertTrue(contract.late_payment_collected)
         self.assertTrue(portfolio.is_fully_settled)
+        self.assertAlmostEqual(result.principal_collected, 150_000)
         self.assertAlmostEqual(portfolio.cumulative_principal_collected, 300_000)
         self.assertAlmostEqual(
             portfolio.cumulative_delayed_payment_amount_scheduled,
@@ -225,7 +226,7 @@ class TestPortfolioSimulator(unittest.TestCase):
         portfolio = make_portfolio(
             budget=1_000_000,
             term=3,
-            rate=0.0,
+            annual_rate=0.0,
             max_hazard=0.005,
         )
         customer_id = 7
@@ -237,18 +238,23 @@ class TestPortfolioSimulator(unittest.TestCase):
         self.assertGreater(initial_risk, initial.risk)
         first_hazard = first.monthly_hazard
 
-        # First repayment lowers outstanding principal and refreshes risk/hazard.
+        # The first payment month is interest-only; principal and risk remain unchanged.
+        portfolio.advance_month()
+        before_principal = portfolio.register_customer(customer_id, make_customer())
+        self.assertAlmostEqual(before_principal.debt, 300_000)
+        self.assertAlmostEqual(before_principal.risk, initial_risk)
+
+        # The next payment reduces outstanding principal and customer risk.
         portfolio.advance_month()
         after_payment = portfolio.register_customer(customer_id, make_customer())
-        self.assertAlmostEqual(after_payment.debt, 200_000)
+        self.assertAlmostEqual(after_payment.debt, 150_000)
         self.assertEqual(after_payment.loan_count, 1)
         self.assertEqual(after_payment.origin_amount, 300_000)
         self.assertGreaterEqual(after_payment.debt_per_loan, 0.0)
         self.assertLess(after_payment.risk, initial_risk)
         self.assertLess(first.monthly_hazard, first_hazard)
 
-        # Reappearing source rows must return the persistent state, not a fresh
-        # baseline with zero simulated debt.
+        # Reappearing source rows return the persistent state, not a fresh baseline.
         second = portfolio.grant_loan(after_payment, 100_000, customer_id=customer_id)
         after_second_loan = portfolio.get_customer_state(customer_id)
         self.assertEqual(len([
@@ -257,11 +263,11 @@ class TestPortfolioSimulator(unittest.TestCase):
         ]), 2)
         self.assertEqual(after_second_loan.loan_count, 2)
         self.assertEqual(after_second_loan.origin_amount, 400_000)
-        self.assertAlmostEqual(after_second_loan.debt, 300_000)
+        self.assertAlmostEqual(after_second_loan.debt, 250_000)
         self.assertGreater(after_second_loan.risk, after_payment.risk)
         self.assertGreaterEqual(second.risk_loading, 0.0)
 
-        # Another successful repayment reduces aggregate exposure and risk again.
+        # The first contract completes its final principal installment.
         risk_after_second_origination = after_second_loan.risk
         portfolio.advance_month()
         self.assertLess(
@@ -273,7 +279,7 @@ class TestPortfolioSimulator(unittest.TestCase):
         portfolio = make_portfolio(
             budget=1_000_000,
             term=1,
-            rate=0.0,
+            annual_rate=0.0,
             collection_lag=4,
             max_hazard=1_000.0,
         )
@@ -301,7 +307,7 @@ class TestPortfolioSimulator(unittest.TestCase):
         portfolio = make_portfolio(
             budget=1_000_000,
             term=1,
-            rate=0.0,
+            annual_rate=0.0,
             collection_lag=12,
             max_hazard=1_000.0,
         )
@@ -419,6 +425,7 @@ class TestPortfolioSimulator(unittest.TestCase):
             portfolio = make_portfolio(
                 budget=1_000_000,
                 term=2,
+                annual_rate=0.04,
                 max_hazard=1000.0,
                 seed=seed,
             )
@@ -428,13 +435,15 @@ class TestPortfolioSimulator(unittest.TestCase):
             outcomes.append((
                 contract.missed_installment_occurred,
                 result.principal_collected,
+                result.interest_collected,
                 result.delayed_payment_amount_scheduled,
             ))
 
         self.assertEqual(outcomes[0], outcomes[1])
         self.assertTrue(outcomes[0][0])
         self.assertEqual(outcomes[0][1], 0.0)
-        self.assertAlmostEqual(outcomes[0][2], 100_000.0)
+        self.assertAlmostEqual(outcomes[0][2], 0.0)
+        self.assertAlmostEqual(outcomes[0][3], 8_000.0)
 
     def test_recovery_rate_is_rejected_when_full_collection_is_assumed(self):
         with self.assertRaises(ValueError):
@@ -451,68 +460,110 @@ class TestPortfolioSimulator(unittest.TestCase):
         portfolio = make_portfolio(
             budget=initial_budget,
             term=term,
-            rate=0.01,
+            annual_rate=0.04,
             max_hazard=0.0,
         )
-
         portfolio.advance_month()
-
         contract = portfolio.grant_loan(
             make_customer(),
             principal,
             customer_id=1,
         )
 
-        self.assertGreater(
-            contract.monthly_payment,
-            principal / term,
-        )
+        self.assertAlmostEqual(contract.annual_interest_rate, 0.04)
+        self.assertAlmostEqual(contract.principal_payment_amount, 150_000)
 
         total_principal_collected = 0.0
         total_interest_collected = 0.0
-
         for _ in range(term):
             result = portfolio.advance_month()
+            total_principal_collected += result.principal_collected
+            total_interest_collected += result.interest_collected
 
-            total_principal_collected += (
-                result.principal_collected
-            )
-
-            total_interest_collected += (
-                result.interest_collected
-            )
-
-        # The entire principal must be repaid.
-        self.assertAlmostEqual(
-            total_principal_collected,
-            principal,
-            places=5,
-        )
-
-        # Positive interest must be collected.
-        self.assertGreater(
-            total_interest_collected,
-            0,
-        )
-
-        # With zero default risk and no capital injections,
-        # principal is fully returned and interest increases cash.
+        self.assertAlmostEqual(total_principal_collected, principal, places=5)
+        self.assertAlmostEqual(total_interest_collected, 12_000, places=5)
         self.assertAlmostEqual(
             portfolio.available_budget,
             initial_budget + total_interest_collected,
             places=5,
         )
+        self.assertEqual(contract.status, "matured")
+        self.assertAlmostEqual(contract.outstanding_principal, 0, places=5)
 
-        self.assertEqual(
-            contract.status,
-            "matured",
-        )
+    def test_twelve_eighteen_and_thirty_six_month_annual_interest_schedule(self):
+        principal = 100_000_000
+        annual_rate = 0.04
+        schedules = {
+            12: {1: 4_000_000.0},
+            18: {1: 4_000_000.0, 13: 1_250_000.0},
+            36: {
+                1: 4_000_000.0,
+                13: 2_666_666.6666666665,
+                25: 1_333_333.3333333333,
+            },
+        }
 
-        self.assertAlmostEqual(
-            contract.outstanding_principal,
-            0,
-            places=5,
-        )
+        for term, expected_interest_by_payment in schedules.items():
+            with self.subTest(term=term):
+                portfolio = make_portfolio(
+                    budget=principal,
+                    term=term,
+                    annual_rate=annual_rate,
+                    max_hazard=0.0,
+                )
+                portfolio.advance_month()
+                contract = portfolio.grant_loan(
+                    make_customer(),
+                    principal,
+                    customer_id=term,
+                )
+
+                interest_months = set(expected_interest_by_payment)
+                principal_months = [
+                    month for month in range(1, term + 1)
+                    if month not in interest_months
+                ]
+                expected_principal_installment = principal / len(principal_months)
+                self.assertAlmostEqual(
+                    contract.principal_payment_amount,
+                    expected_principal_installment,
+                    places=5,
+                )
+
+                total_principal = 0.0
+                total_interest = 0.0
+                for payment_number in range(1, term + 1):
+                    result = portfolio.advance_month()
+                    expected_principal = (
+                        0.0
+                        if payment_number in interest_months
+                        else expected_principal_installment
+                    )
+                    expected_interest = expected_interest_by_payment.get(
+                        payment_number,
+                        0.0,
+                    )
+                    self.assertAlmostEqual(
+                        result.principal_collected,
+                        expected_principal,
+                        delta=0.02,
+                    )
+                    self.assertAlmostEqual(
+                        result.interest_collected,
+                        expected_interest,
+                        delta=0.02,
+                    )
+                    total_principal += result.principal_collected
+                    total_interest += result.interest_collected
+
+                self.assertAlmostEqual(total_principal, principal, delta=0.02)
+                self.assertAlmostEqual(
+                    total_interest,
+                    sum(expected_interest_by_payment.values()),
+                    delta=0.02,
+                )
+                self.assertEqual(contract.status, "matured")
+
 
 
 if __name__ == "__main__":
