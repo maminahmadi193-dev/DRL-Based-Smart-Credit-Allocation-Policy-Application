@@ -138,9 +138,8 @@ def main():
         }
         for metric in (
             "total_reward_as_trained",
-            "total_reward_under_legacy_formula",
-            "total_reward_under_amount_sensitive_formula",
-            "social_reward_amount_sensitive",
+            "total_reward_amount_sensitive",
+            "social_reward",
             "financial_pnl",
             "total_risk_penalty",
             "total_recognized_default_penalty",
