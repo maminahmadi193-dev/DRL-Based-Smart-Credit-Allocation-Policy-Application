@@ -607,6 +607,8 @@ def main():
         "split_info": split_info,
         "hazard_intercept": args.hazard_intercept,
         "hazard_calibration": hazard_calibration,
+        "reward_mode": "amount_sensitive",
+        "environment_model_version": PortfolioLoanEnv.ENVIRONMENT_MODEL_VERSION,
         "policies": list(POLICIES),
         "metric_definitions": {
             "total_reward": "Sum of the environment rewards, including scaled financial reward.",
