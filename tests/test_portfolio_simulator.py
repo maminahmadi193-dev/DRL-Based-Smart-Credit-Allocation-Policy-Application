@@ -697,6 +697,55 @@ class TestPortfolioSimulator(unittest.TestCase):
             delta=0.02,
         )
 
+    def test_missed_interest_remains_customer_debt_until_late_collection(self):
+        principal = 100_000_000.0
+        portfolio = make_portfolio(
+            budget=principal,
+            term=18,
+            annual_rate=0.04,
+            collection_lag=4,
+            max_hazard=0.0,
+        )
+        customer_id = 19
+        portfolio.advance_month()
+        contract = portfolio.grant_loan(
+            make_customer(),
+            principal,
+            customer_id=customer_id,
+        )
+        risk_before_miss = portfolio.get_customer_state(customer_id).risk
+
+        # The first due installment contains annual interest only.
+        contract.monthly_miss_probability = 1.0
+        missed = portfolio.advance_month()
+        self.assertAlmostEqual(missed.principal_collected, 0.0, delta=0.02)
+        self.assertAlmostEqual(missed.interest_collected, 0.0, delta=0.02)
+        self.assertAlmostEqual(contract.missed_principal, 0.0, delta=0.02)
+        self.assertAlmostEqual(contract.missed_interest, 4_000_000.0, delta=0.02)
+
+        customer_after_miss = portfolio.get_customer_state(customer_id)
+        self.assertAlmostEqual(customer_after_miss.debt, 104_000_000.0, delta=0.02)
+        self.assertGreater(customer_after_miss.risk, risk_before_miss)
+
+        # The missed interest remains in debt while later principal installments
+        # are paid. On the fourth month it is collected and removed from debt.
+        for _ in range(4):
+            result = portfolio.advance_month()
+        self.assertAlmostEqual(
+            result.delayed_payment_amount_collected,
+            4_000_000.0,
+            delta=0.02,
+        )
+        self.assertTrue(contract.late_payment_collected)
+
+        customer_after_collection = portfolio.get_customer_state(customer_id)
+        self.assertAlmostEqual(
+            customer_after_collection.debt,
+            contract.outstanding_principal,
+            delta=0.02,
+        )
+        self.assertLess(customer_after_collection.risk, customer_after_miss.risk)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
