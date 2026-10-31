@@ -20,7 +20,7 @@ The core pieces are:
 
 ## Portfolio reward design
 
-The portfolio DQN training, baseline-policy evaluation, checkpoint evaluation, and reward diagnostics use one fixed amount-sensitive social reward design. History and facility-access rewards scale with estimated-need coverage; there is no mode-selection flag. The historical amount-independent formula is isolated in `LegacySingleCustomerRewardEngine` for the older single-customer `LoanEnv` workflow only. The portfolio environment model version is 12 because reward semantics changed; checkpoints from earlier environment versions must be retrained before evaluation.
+The portfolio DQN training, baseline-policy evaluation, checkpoint evaluation, and reward diagnostics use one fixed amount-sensitive social reward design. History and facility-access rewards scale with estimated-need coverage; there is no mode-selection flag. The historical amount-independent formula is isolated in `LegacySingleCustomerRewardEngine` for the older single-customer `LoanEnv`, legacy policy-classifier, and legacy Q-regression workflows only. The portfolio environment model version is 12 because reward semantics changed; checkpoints from earlier environment versions must be retrained before evaluation.
 
 ## Data
 
