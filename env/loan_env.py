@@ -3,7 +3,7 @@ import numpy as np
 
 from customer_state import CustomerState
 from customer_simulator import CustomerSimulator
-from reward_engine import RewardEngine
+from reward_engine import LegacySingleCustomerRewardEngine
 
 
 class LoanEnv(gym.Env):
@@ -17,7 +17,7 @@ class LoanEnv(gym.Env):
 
         self.simulator = CustomerSimulator()
 
-        self.reward_engine = RewardEngine()
+        self.reward_engine = LegacySingleCustomerRewardEngine()
 
         self.current_customer = None
 

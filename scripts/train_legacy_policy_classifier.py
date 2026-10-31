@@ -15,7 +15,7 @@ from sklearn.preprocessing import StandardScaler
 
 from customer_state import CustomerState
 from customer_simulator import CustomerSimulator
-from reward_engine import RewardEngine
+from reward_engine import LegacySingleCustomerRewardEngine
 
 
 # ============================================================================
@@ -595,7 +595,7 @@ def main():
 
     simulator = CustomerSimulator()
 
-    reward_engine = RewardEngine()
+    reward_engine = LegacySingleCustomerRewardEngine()
 
     # =========================================================================
     # Generate Oracle Rewards

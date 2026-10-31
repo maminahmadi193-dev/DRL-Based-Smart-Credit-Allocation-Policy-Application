@@ -1,9 +1,9 @@
-"""Unit tests for legacy and amount-sensitive RewardEngine variants."""
+"""Tests for the canonical portfolio reward and isolated historical compatibility reward."""
 
 import unittest
 from types import SimpleNamespace
 
-from reward_engine import RewardEngine
+from reward_engine import LegacySingleCustomerRewardEngine, RewardEngine
 
 
 def make_customer(score=0.0, total_facilities=0.0, has_no_history=True):
@@ -15,20 +15,10 @@ def make_customer(score=0.0, total_facilities=0.0, has_no_history=True):
 
 
 class TestRewardEngine(unittest.TestCase):
-
-    def test_legacy_mode_preserves_amount_independent_access_rewards(self):
+    def test_amount_sensitive_reward_is_the_only_portfolio_reward_design(self):
         engine = RewardEngine()
         customer = make_customer(score=0, total_facilities=0, has_no_history=True)
-        self.assertAlmostEqual(
-            engine._social_reward(customer, 100_000_000), 2.2
-        )
-        self.assertAlmostEqual(
-            engine._social_reward(customer, 500_000_000), 3.0
-        )
 
-    def test_experimental_mode_scales_both_access_rewards_with_coverage(self):
-        engine = RewardEngine(scale_access_rewards_by_coverage=True)
-        customer = make_customer(score=0, total_facilities=0, has_no_history=True)
         reward_100m = engine._social_reward(customer, 100_000_000)
         reward_200m = engine._social_reward(customer, 200_000_000)
         reward_500m = engine._social_reward(customer, 500_000_000)
@@ -40,11 +30,7 @@ class TestRewardEngine(unittest.TestCase):
         self.assertLess(reward_200m, reward_500m)
 
     def test_zero_amount_receives_zero_social_reward(self):
-        for experimental in (False, True):
-            engine = RewardEngine(
-                scale_access_rewards_by_coverage=experimental
-            )
-            self.assertEqual(engine._social_reward(make_customer(), 0), 0.0)
+        self.assertEqual(RewardEngine()._social_reward(make_customer(), 0), 0.0)
 
     def test_default_cost_is_charged_only_for_newly_recognized_defaults(self):
         engine = RewardEngine(default_cost=10.0)
@@ -70,6 +56,25 @@ class TestRewardEngine(unittest.TestCase):
         self.assertGreater(
             engine._facility_reward(low_limit),
             engine._facility_reward(high_limit),
+        )
+
+
+class TestLegacySingleCustomerRewardEngine(unittest.TestCase):
+    def test_historical_single_customer_formula_is_preserved(self):
+        engine = LegacySingleCustomerRewardEngine()
+        customer = make_customer(score=0, total_facilities=0, has_no_history=True)
+
+        self.assertAlmostEqual(
+            engine._social_reward(customer, 100_000_000), 2.2
+        )
+        self.assertAlmostEqual(
+            engine._social_reward(customer, 500_000_000), 3.0
+        )
+
+    def test_zero_amount_receives_zero_social_reward(self):
+        self.assertEqual(
+            LegacySingleCustomerRewardEngine()._social_reward(make_customer(), 0),
+            0.0,
         )
 
 

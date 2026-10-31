@@ -34,9 +34,9 @@ class PortfolioLoanEnv(gym.Env):
 
     metadata = {"render_modes": []}
 
-    # Increment when observation or transition semantics change in a way
+    # Increment when observation, transition, or reward semantics change in a way
     # that makes previously trained checkpoints incompatible.
-    ENVIRONMENT_MODEL_VERSION = 11
+    ENVIRONMENT_MODEL_VERSION = 12
 
     CUSTOMER_FEATURE_COUNT = CustomerState.FEATURE_COUNT
     PORTFOLIO_FEATURE_COUNT = 16
@@ -86,7 +86,6 @@ class PortfolioLoanEnv(gym.Env):
         financial_reward_weight=1.0,
         financial_reward_scale=100_000_000,
         invalid_action_penalty=0.25,
-        scale_access_rewards_by_coverage=False,
         risk_weight=1.0,
         default_cost=10.0,
         reapplication_share=0.10,
@@ -245,11 +244,7 @@ class PortfolioLoanEnv(gym.Env):
             invalid_action_penalty
         )
 
-        self.scale_access_rewards_by_coverage = bool(
-            scale_access_rewards_by_coverage
-        )
         self.reward_engine = RewardEngine(
-            scale_access_rewards_by_coverage=self.scale_access_rewards_by_coverage,
             risk_weight=risk_weight,
             default_cost=default_cost,
         )

@@ -240,7 +240,7 @@ class TestPortfolioLoanEnv(unittest.TestCase):
         )
 
     def test_environment_model_version_tracks_observation_semantics(self):
-        self.assertEqual(PortfolioLoanEnv.ENVIRONMENT_MODEL_VERSION, 11)
+        self.assertEqual(PortfolioLoanEnv.ENVIRONMENT_MODEL_VERSION, 12)
         self.assertEqual(len(PortfolioLoanEnv.DYNAMIC_CUSTOMER_FIELDS), 7)
 
     def test_reset_returns_valid_observation(self):

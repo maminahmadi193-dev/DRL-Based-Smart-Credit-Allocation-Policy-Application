@@ -13,7 +13,6 @@ class RewardEngine:
         default_cost=10.0,
         facility_decay=1e-9,
         need_decay=1e-9,
-        scale_access_rewards_by_coverage=False,
     ):
 
         if not np.isfinite(risk_weight) or risk_weight < 0.0:
@@ -30,9 +29,6 @@ class RewardEngine:
         self.facility_decay = facility_decay
 
         self.need_decay = need_decay
-        self.scale_access_rewards_by_coverage = bool(
-            scale_access_rewards_by_coverage
-        )
 
 
     def _estimated_need_amount(
@@ -118,26 +114,10 @@ class RewardEngine:
             previous_customer,
             approved_unsecured_amount,
         )
-        # Legacy mode preserves the original amount-independent access
-        # bonuses. Experimental mode ties both access bonuses to coverage.
-        access_coverage = (
-            coverage
-            if self.scale_access_rewards_by_coverage
-            else 1.0
-        )
         return (
-            self._history_reward(
-                previous_customer,
-                coverage=access_coverage,
-            )
-            + self._facility_reward(
-                previous_customer,
-                coverage=access_coverage,
-            )
-            + self._need_reward(
-                previous_customer,
-                approved_unsecured_amount,
-            )
+            self._history_reward(previous_customer, coverage=coverage)
+            + self._facility_reward(previous_customer, coverage=coverage)
+            + self._need_reward(previous_customer, approved_unsecured_amount)
         )
 
     def risk_increase_penalty(self, risk_increase: float) -> float:
@@ -224,3 +204,31 @@ class RewardEngine:
         # penalty. The portfolio environment applies default_cost only when
         # the loan simulator actually registers a default event.
         return social_reward - risk_penalty
+
+
+class LegacySingleCustomerRewardEngine(RewardEngine):
+    """Preserve the historical reward formula for the retired single-customer workflow.
+
+    The portfolio-level environment must use RewardEngine, which is always
+    amount-sensitive. This compatibility class is intentionally isolated from
+    portfolio training and evaluation so old single-customer experiments keep
+    their original amount-independent access bonuses.
+    """
+
+    def _social_reward(
+        self,
+        previous_customer: CustomerState,
+        approved_unsecured_amount: float,
+    ) -> float:
+        if approved_unsecured_amount <= 0:
+            return 0.0
+
+        coverage = self._need_coverage(
+            previous_customer,
+            approved_unsecured_amount,
+        )
+        return (
+            self._history_reward(previous_customer, coverage=1.0)
+            + self._facility_reward(previous_customer, coverage=1.0)
+            + self._need_reward(previous_customer, approved_unsecured_amount)
+        )
