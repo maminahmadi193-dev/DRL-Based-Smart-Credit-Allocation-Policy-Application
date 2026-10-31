@@ -25,10 +25,8 @@ from reward_engine import RewardEngine
 
 ACTION_AMOUNTS = (0, 100_000_000, 200_000_000, 300_000_000, 400_000_000, 500_000_000)
 POSITIVE_AMOUNTS = ACTION_AMOUNTS[1:]
-MODES = {
-    "legacy": RewardEngine(scale_access_rewards_by_coverage=False),
-    "amount_sensitive": RewardEngine(scale_access_rewards_by_coverage=True),
-}
+REWARD_MODE = "amount_sensitive"
+REWARD_ENGINE = RewardEngine()
 
 
 def parse_args():
@@ -99,7 +97,7 @@ def summarize_mode(frame, mode):
     for amount, column in zip(POSITIVE_AMOUNTS, reward_cols):
         reward = frame[column].to_numpy(dtype=float)
         rows.append({
-            "mode": mode,
+            "reward_mode": mode,
             "action_amount": amount,
             "mean_immediate_social_reward": float(np.mean(reward)),
             "median_immediate_social_reward": float(np.median(reward)),
@@ -166,28 +164,21 @@ def main():
     print("Reward scope: immediate social reward only (no future cash flows, no risk/default penalty)")
     print("-" * 78)
 
-    rewards = {mode: np.zeros((len(data), len(ACTION_AMOUNTS)), dtype=float) for mode in MODES}
+    rewards = np.zeros((len(data), len(ACTION_AMOUNTS)), dtype=float)
     for row_idx, (_, row) in enumerate(data.iterrows()):
         customer = row_to_customer(row)
-        for mode, engine in MODES.items():
-            for action_idx, amount in enumerate(ACTION_AMOUNTS):
-                rewards[mode][row_idx, action_idx] = engine._social_reward(
-                    previous_customer=customer,
-                    approved_unsecured_amount=amount,
-                )
-
-    # Store both reward designs at applicant level for independent inspection.
-    for mode, matrix in rewards.items():
         for action_idx, amount in enumerate(ACTION_AMOUNTS):
-            data[f"{mode}_reward_{amount}"] = matrix[:, action_idx]
+            rewards[row_idx, action_idx] = REWARD_ENGINE._social_reward(
+                previous_customer=customer,
+                approved_unsecured_amount=amount,
+            )
 
-    summary_rows = []
-    diagnostics_rows = []
-    for mode in MODES:
-        mode_rows, diagnostics, smallest_max = summarize_mode(data, mode)
-        summary_rows.extend(mode_rows)
-        diagnostics_rows.append(diagnostics)
-        data[f"{mode}_smallest_maximizing_amount"] = smallest_max
+    for action_idx, amount in enumerate(ACTION_AMOUNTS):
+        data[f"{REWARD_MODE}_reward_{amount}"] = rewards[:, action_idx]
+
+    summary_rows, diagnostics, smallest_max = summarize_mode(data, REWARD_MODE)
+    diagnostics_rows = [diagnostics]
+    data[f"{REWARD_MODE}_smallest_maximizing_amount"] = smallest_max
 
     summary_df = pd.DataFrame(summary_rows)
     diagnostics_df = pd.DataFrame(diagnostics_rows)
@@ -203,7 +194,7 @@ def main():
     summary_df.to_csv(summary_path, index=False)
 
     display_cols = [
-        "mode",
+        "reward_mode",
         "action_amount",
         "mean_immediate_social_reward",
         "median_immediate_social_reward",
@@ -226,7 +217,7 @@ def main():
     print()
     print("POPULATION DIAGNOSTICS")
     for _, row in diagnostics_df.iterrows():
-        print(f"Mode: {row['mode']}")
+        print("Reward design: amount-sensitive")
         print(f"  100M is a maximizer (ties included)         : {row['share_100M_is_a_maximizer_including_ties']:.2%}")
         print(f"  100M is the unique maximizer                : {row['share_100M_is_the_unique_maximizer']:.2%}")
         print(f"  Some larger amount strictly beats 100M     : {row['share_any_larger_amount_strictly_beats_100M']:.2%}")
