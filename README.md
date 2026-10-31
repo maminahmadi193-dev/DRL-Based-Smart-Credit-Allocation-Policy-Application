@@ -10,13 +10,17 @@ The core pieces are:
 
 - `env/customer_state.py` — persistent customer state.
 - `env/customer_simulator.py` — customer-level feature/risk behavior.
-- `env/reward_engine.py` — reward components.
+- `env/reward_engine.py` — the canonical amount-sensitive portfolio reward; the historical amount-independent formula is isolated for the retired single-customer workflow.
 - `env/portfolio_simulator.py` — shared cash, contracts, installments, missed payments, collections, and portfolio accounting.
 - `env/portfolio_loan_env.py` — the Gymnasium environment for portfolio-level allocation.
 - `env/portfolio_experiment_utils.py` — data splitting, feature scaling, and shared experiment utilities.
 - `scripts/train_portfolio_dqn.py` — DQN training entry point.
 - `scripts/evaluate_portfolio_dqn.py`, `scripts/evaluate_portfolio_dqn_checkpoints.py`, and `scripts/evaluate_baseline_policies.py` — evaluation entry points.
 - `scripts/analyze_budget_sensitivity.py` — evaluates one frozen checkpoint across initial-budget scenarios; it does not train a model.
+
+## Portfolio reward design
+
+The portfolio DQN training, baseline-policy evaluation, checkpoint evaluation, and reward diagnostics use one fixed amount-sensitive social reward design. History and facility-access rewards scale with estimated-need coverage; there is no mode-selection flag. The historical amount-independent formula is isolated in `LegacySingleCustomerRewardEngine` for the older single-customer `LoanEnv` workflow only. The portfolio environment model version is 12 because reward semantics changed; checkpoints from earlier environment versions must be retrained before evaluation.
 
 ## Data
 
