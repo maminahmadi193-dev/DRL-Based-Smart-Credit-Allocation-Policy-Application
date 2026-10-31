@@ -207,9 +207,11 @@ def main():
     with config_path.open("r", encoding="utf-8") as f:
         config = json.load(f)
 
-    if int(config.get("environment_model_version", 1)) < 7:
+    if int(config.get("environment_model_version", 1)) < PortfolioLoanEnv.ENVIRONMENT_MODEL_VERSION:
         raise ValueError(
-            "This diagnostic requires environment model version >= 7."
+            f"This diagnostic requires environment model version "
+            f">= {PortfolioLoanEnv.ENVIRONMENT_MODEL_VERSION}; the checkpoint "
+            "must use the synchronized customer-observation semantics."
         )
 
     checkpoint_paths = _checkpoint_map(checkpoint_dir, args.run_name)

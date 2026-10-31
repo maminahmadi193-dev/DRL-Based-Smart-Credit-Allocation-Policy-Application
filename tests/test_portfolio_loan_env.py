@@ -142,6 +142,10 @@ class TestPortfolioLoanEnv(unittest.TestCase):
         self.assertEqual(calibration["reference_population_rows"], len(df))
         self.assertEqual(calibration["calibration_horizon_months"], 12)
 
+    def test_environment_model_version_tracks_observation_semantics(self):
+        self.assertEqual(PortfolioLoanEnv.ENVIRONMENT_MODEL_VERSION, 8)
+        self.assertEqual(len(PortfolioLoanEnv.DYNAMIC_CUSTOMER_FIELDS), 7)
+
     def test_reset_returns_valid_observation(self):
         env = make_env()
 

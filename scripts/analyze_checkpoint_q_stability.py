@@ -23,6 +23,7 @@ from compare_checkpoint_actions_fixed_states import (
     collect_reference_observations,
 )
 from portfolio_experiment_utils import load_split_and_scaler, project_root
+from portfolio_loan_env import PortfolioLoanEnv
 
 
 DEFAULT_CHECKPOINT_STEPS = [60_000, 70_000, 80_000, 85_000, 90_000, 95_000, 100_000]
@@ -132,8 +133,12 @@ def main():
         raise FileNotFoundError(f"Missing run config: {config_path}")
     with config_path.open("r", encoding="utf-8") as f:
         config = json.load(f)
-    if int(config.get("environment_model_version", 1)) < 7:
-        raise ValueError("This diagnostic requires environment model version >= 7.")
+    if int(config.get("environment_model_version", 1)) < PortfolioLoanEnv.ENVIRONMENT_MODEL_VERSION:
+        raise ValueError(
+            f"This diagnostic requires environment model version "
+            f">= {PortfolioLoanEnv.ENVIRONMENT_MODEL_VERSION}; the checkpoint "
+            "must use the synchronized customer-observation semantics."
+        )
 
     checkpoint_map = _checkpoint_map(run_dir / "checkpoints", args.run_name)
     missing = [step for step in args.checkpoint_steps if step not in checkpoint_map]

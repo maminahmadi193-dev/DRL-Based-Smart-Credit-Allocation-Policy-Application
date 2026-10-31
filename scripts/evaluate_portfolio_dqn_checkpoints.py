@@ -20,6 +20,7 @@ from stable_baselines3 import DQN
 import _bootstrap  # noqa: F401
 from evaluate_portfolio_dqn import evaluate_episode
 from portfolio_experiment_utils import load_split_and_scaler, project_root
+from portfolio_loan_env import PortfolioLoanEnv
 
 
 def parse_args():
@@ -52,10 +53,13 @@ def main():
 
     with config_path.open("r", encoding="utf-8") as config_file:
         config = json.load(config_file)
-    if int(config.get("environment_model_version", 1)) < 7:
+    if int(config.get("environment_model_version", 1)) < PortfolioLoanEnv.ENVIRONMENT_MODEL_VERSION:
         raise ValueError(
-            "This run predates the current reapplication and one-time new-to-credit "
-            "state behavior. Retrain with the current env/train_portfolio_dqn.py first."
+            f"This run uses environment_model_version="
+            f"{config.get('environment_model_version', 1)}; the current environment "
+            f"requires version {PortfolioLoanEnv.ENVIRONMENT_MODEL_VERSION} because "
+            "customer-observation synchronization semantics have changed. "
+            "Retrain with scripts/train_portfolio_dqn.py before checkpoint evaluation."
         )
 
     checkpoint_dir = (
