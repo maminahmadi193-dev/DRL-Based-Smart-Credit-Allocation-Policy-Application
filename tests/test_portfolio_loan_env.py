@@ -239,9 +239,32 @@ class TestPortfolioLoanEnv(unittest.TestCase):
             atol=1e-12,
         )
 
-    def test_environment_model_version_tracks_observation_semantics(self):
+    def test_environment_model_version_tracks_observation_and_reward_semantics(self):
         self.assertEqual(PortfolioLoanEnv.ENVIRONMENT_MODEL_VERSION, 12)
         self.assertEqual(len(PortfolioLoanEnv.DYNAMIC_CUSTOMER_FIELDS), 7)
+
+    def test_portfolio_reward_uses_fixed_amount_sensitive_engine(self):
+        import inspect
+        from reward_engine import RewardEngine
+
+        env = make_env()
+        try:
+            self.assertIsInstance(env.reward_engine, RewardEngine)
+            self.assertNotIn(
+                "scale_access_rewards_by_coverage",
+                inspect.signature(RewardEngine.__init__).parameters,
+            )
+            customer = SimpleNamespace(
+                total_customer_score=0.0,
+                total_facilities=0.0,
+                has_no_history=True,
+            )
+            self.assertAlmostEqual(
+                env.reward_engine._social_reward(customer, 100_000_000),
+                0.6,
+            )
+        finally:
+            env.close()
 
     def test_reset_returns_valid_observation(self):
         env = make_env()
