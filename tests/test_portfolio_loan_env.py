@@ -143,7 +143,7 @@ class TestPortfolioLoanEnv(unittest.TestCase):
         self.assertEqual(calibration["calibration_horizon_months"], 12)
 
     def test_environment_model_version_tracks_observation_semantics(self):
-        self.assertEqual(PortfolioLoanEnv.ENVIRONMENT_MODEL_VERSION, 8)
+        self.assertEqual(PortfolioLoanEnv.ENVIRONMENT_MODEL_VERSION, 9)
         self.assertEqual(len(PortfolioLoanEnv.DYNAMIC_CUSTOMER_FIELDS), 7)
 
     def test_reset_returns_valid_observation(self):
@@ -648,7 +648,7 @@ class TestPortfolioLoanEnv(unittest.TestCase):
                 max_applicants_per_month=5,
             )
 
-    def test_annual_nominal_rate_is_converted_to_monthly_rate(self):
+    def test_annual_interest_is_charged_at_annual_due_months(self):
         env = make_env(
             initial_budget=100_000_000,
             applicants_per_month=1,
@@ -658,19 +658,45 @@ class TestPortfolioLoanEnv(unittest.TestCase):
         )
         env.reset(seed=42)
 
-        _, _, terminated, _, info = env.step(1)
-
+        _, _, terminated, _, _ = env.step(1)
         self.assertFalse(terminated)
         self.assertEqual(env.phase, "transition")
+
+        # The first scheduled payment is due in the next calendar month:
+        # annual interest is charged, while principal remains unchanged.
+        _, _, terminated, _, first_payment = env.step(0)
+        self.assertFalse(terminated)
         self.assertAlmostEqual(env.annual_interest_rate, 0.04)
-        self.assertAlmostEqual(env.monthly_interest_rate, 0.04 / 12.0)
         self.assertAlmostEqual(
-            env.portfolio.contracts[0].monthly_interest_rate,
-            0.04 / 12.0,
+            env.portfolio.contracts[0].annual_interest_rate,
+            0.04,
+        )
+        self.assertAlmostEqual(first_payment["principal_collected"], 0.0)
+        self.assertAlmostEqual(first_payment["interest_collected"], 4_000_000.0)
+        self.assertAlmostEqual(
+            env.portfolio.contracts[0].outstanding_principal,
+            100_000_000.0,
         )
 
-        _, _, terminated, _, info = env.step(0)
-        self.assertGreater(info["interest_collected"], 0.0)
+        # Principal is split across months 2..12 and 14..18.
+        principal_installment = 100_000_000.0 / 16.0
+        for _ in range(11):
+            result = env.portfolio.advance_month()
+            self.assertAlmostEqual(
+                result.principal_collected,
+                principal_installment,
+                delta=0.02,
+            )
+            self.assertAlmostEqual(result.interest_collected, 0.0, delta=0.02)
+
+        second_year_interest = env.portfolio.advance_month()
+        self.assertAlmostEqual(second_year_interest.principal_collected, 0.0)
+        self.assertAlmostEqual(
+            second_year_interest.interest_collected,
+            1_250_000.0,
+            delta=0.02,
+        )
+        env.close()
 
     def test_one_year_origination_then_settlement_to_longest_maturity(self):
         env = make_env(
@@ -1052,6 +1078,7 @@ class TestPortfolioLoanEnv(unittest.TestCase):
             applicants_per_month=2,
             origination_months=2,
             loan_term_months=4,
+            annual_interest_rate=0.04,
             reapplication_share=1.0,
             reapplication_cooldown_months=1,
             max_hazard=1_000.0,
