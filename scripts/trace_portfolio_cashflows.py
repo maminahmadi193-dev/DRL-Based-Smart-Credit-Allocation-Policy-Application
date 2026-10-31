@@ -244,7 +244,7 @@ def main():
         print(f"Seed                    : {args.seed}")
         print(f"Loan term               : {args.loan_term_months} months")
         print(f"Annual nominal rate     : {args.annual_interest_rate:.2%}")
-        print(f"Monthly nominal rate    : {args.annual_interest_rate / 12:.6%}")
+        print("Interest charge months  : 1, 13, 25, ... (annual rate on outstanding principal)")
         print(f"Forced missed-payment stress: {args.stress_max_delay}")
         print(f"Monthly miss probability: {monthly_miss_probability:.4%}")
         print(f"Maximum monthly hazard : {maximum_hazard:.6f}")
