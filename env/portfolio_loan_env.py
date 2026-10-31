@@ -36,7 +36,7 @@ class PortfolioLoanEnv(gym.Env):
 
     # Increment when observation or transition semantics change in a way
     # that makes previously trained checkpoints incompatible.
-    ENVIRONMENT_MODEL_VERSION = 9
+    ENVIRONMENT_MODEL_VERSION = 10
 
     CUSTOMER_FEATURE_COUNT = CustomerState.FEATURE_COUNT
     PORTFOLIO_FEATURE_COUNT = 16
