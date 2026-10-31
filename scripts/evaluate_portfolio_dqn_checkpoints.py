@@ -58,8 +58,13 @@ def main():
             f"This run uses environment_model_version="
             f"{config.get('environment_model_version', 1)}; the current environment "
             f"requires version {PortfolioLoanEnv.ENVIRONMENT_MODEL_VERSION} because "
-            "customer-observation synchronization semantics have changed. "
+            "customer-observation and reward semantics have changed. "
             "Retrain with scripts/train_portfolio_dqn.py before checkpoint evaluation."
+        )
+    if config.get("reward_mode") != "amount_sensitive":
+        raise ValueError(
+            "Checkpoint evaluation requires a run trained with the canonical "
+            "amount-sensitive portfolio reward design."
         )
 
     checkpoint_dir = (
