@@ -78,8 +78,8 @@ class RewardEngine:
 
         TotalFacilities represents the amount the existing bank credit-scoring
         system says the customer may qualify for; it is not an amount actually
-        borrowed. In the experimental design, this reward also scales with
-        estimated-need coverage.
+        borrowed. This canonical portfolio reward scales with estimated-need
+        coverage.
         """
         eligibility_limit = max(0.0, float(previous_customer.total_facilities))
         priority = 1.0 / (
