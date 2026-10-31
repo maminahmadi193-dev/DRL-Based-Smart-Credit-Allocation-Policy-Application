@@ -9,7 +9,12 @@ from gymnasium.utils.env_checker import check_env
 
 from customer_state import CustomerState
 from portfolio_loan_env import PortfolioLoanEnv
-from portfolio_experiment_utils import calibrate_hazard_intercept_for_population
+from customer_simulator import CustomerSimulator
+from portfolio_experiment_utils import (
+    calibrate_hazard_intercept_for_population,
+    normalize_customer_financial_features,
+    reference_risk_scores_after_loan,
+)
 
 
 FEATURE_COLUMNS = [
@@ -142,8 +147,100 @@ class TestPortfolioLoanEnv(unittest.TestCase):
         self.assertEqual(calibration["reference_population_rows"], len(df))
         self.assertEqual(calibration["calibration_horizon_months"], 12)
 
+
+    def test_financial_feature_normalization_matches_runtime_customer_state(self):
+        raw = pd.DataFrame({
+            "DebtAmount": [-10.0, 30.0, 80.0],
+            "OriginAmount": [0.0, 60.0, -5.0],
+            "LoanCounts": [0, 2.9, -1],
+            "DebtRatio": [99.0, -99.0, 77.0],
+            "DebtPerLoan": [99.0, -99.0, 77.0],
+            "TotalFacilities": [-1.0, 20.0, 30.0],
+        })
+        normalized = normalize_customer_financial_features(raw)
+
+        np.testing.assert_allclose(
+            normalized["DebtAmount"].to_numpy(),
+            [0.0, 30.0, 80.0],
+        )
+        np.testing.assert_allclose(
+            normalized["OriginAmount"].to_numpy(),
+            [0.0, 60.0, 0.0],
+        )
+        np.testing.assert_array_equal(
+            normalized["LoanCounts"].to_numpy(),
+            [0, 2, 0],
+        )
+        np.testing.assert_allclose(
+            normalized["DebtRatio"].to_numpy(),
+            [0.0, 0.5, 0.0],
+        )
+        np.testing.assert_allclose(
+            normalized["DebtPerLoan"].to_numpy(),
+            [0.0, 15.0, 0.0],
+        )
+        np.testing.assert_allclose(
+            normalized["TotalFacilities"].to_numpy(),
+            [0.0, 20.0, 30.0],
+        )
+
+    def test_reference_risk_calibration_matches_runtime_risk_update(self):
+        df, _ = make_dataset(n=31)
+        # Include a first-time customer and rows whose raw derived ratios are
+        # deliberately inconsistent with their underlying financial fields.
+        df.loc[0, ["DebtAmount", "OriginAmount", "LoanCounts"]] = [0.0, 0.0, 0]
+        df.loc[0, ["DebtRatio", "DebtPerLoan"]] = [0.9, 123.0]
+        df.loc[1, ["DebtRatio", "DebtPerLoan"]] = [0.01, 1.0]
+
+        amount = 100_000_000.0
+        vectorized = reference_risk_scores_after_loan(
+            df,
+            reference_loan_amount=amount,
+        )
+        simulator = CustomerSimulator()
+        runtime = []
+
+        for _, row in df.iterrows():
+            debt = max(0.0, float(row["DebtAmount"]))
+            origin = max(0.0, float(row["OriginAmount"]))
+            count = max(0, int(row["LoanCounts"]))
+            customer = CustomerState(
+                monthly_income=float(row["MountlyIncome"]),
+                income_score=float(row["IncomeScore"]),
+                job_score=float(row["JobScore"]),
+                asset_score=float(row["AssetScore"]),
+                total_customer_score=float(row["TotalCustomerScore"]),
+                total_facilities=max(0.0, float(row["TotalFacilities"])),
+                debt=debt,
+                origin_amount=origin,
+                loan_count=count,
+                debt_ratio=debt / origin if origin > 0.0 else 0.0,
+                debt_per_loan=debt / count if count > 0 else 0.0,
+                has_no_history=bool(row["Has_No_History"]),
+                employed=bool(row["Employed"]),
+                score_min=float(row["Score_Min"]),
+                score_max=float(row["Score_Max"]),
+                risk_min=float(row["Risk_Min"]),
+                risk_max=float(row["Risk_Max"]),
+                risk=(float(row["Risk_Min"]) + float(row["Risk_Max"])) / 2.0,
+            )
+            updated = simulator._update_customer_state(customer, amount)
+            updated_risk = simulator._update_risk(
+                updated,
+                customer,
+                amount,
+            )
+            runtime.append(updated_risk)
+
+        np.testing.assert_allclose(
+            vectorized,
+            np.asarray(runtime),
+            rtol=0.0,
+            atol=1e-12,
+        )
+
     def test_environment_model_version_tracks_observation_semantics(self):
-        self.assertEqual(PortfolioLoanEnv.ENVIRONMENT_MODEL_VERSION, 10)
+        self.assertEqual(PortfolioLoanEnv.ENVIRONMENT_MODEL_VERSION, 11)
         self.assertEqual(len(PortfolioLoanEnv.DYNAMIC_CUSTOMER_FIELDS), 7)
 
     def test_reset_returns_valid_observation(self):
