@@ -100,7 +100,6 @@ class FiniteCreditReferenceMDP:
         self.reward_engine = RewardEngine(
             history_reward=1.0, facility_weight=1.0, need_weight=1.0,
             risk_weight=self.risk_weight, default_cost=self.default_cost,
-            scale_access_rewards_by_coverage=True,
         )
         # Only states reachable from the genuine initial condition are included.
         self.start_state: State = (0, self.INITIAL_CASH_UNITS)
